@@ -252,6 +252,8 @@ Use the MongoDB Node driver and explicit Zod domain validation; an additional OR
 
 ### 6.1 Google sign-in
 
+F02 implementation checkpoint (20 October 2026): pinned `next-auth@5.0.0-beta.32`, `@auth/mongodb-adapter@3.11.3`, and MongoDB Node driver 6.21.0. The v5 package is explicitly a prerelease; upgrades require focused auth regression checks. Adapter schema remains library-owned. Google account linking persists only identity keys, not API/refresh/ID tokens. Database expiry enforces the seven-day absolute session deadline even if Auth.js renews a browser cookie. Live OAuth/MongoDB acceptance remains pending local setup; PROJECT_STATUS.md distinguishes implemented code from demonstrated integrations.
+
 1. Auth.js starts Google OAuth with its supported state/PKCE/session protections; use the installed library's implementation rather than custom OAuth for sign-in.
 2. Require Google `email_verified` and an exact normalized email in `TEAM_ALLOWED_EMAILS`. Do not grant access by email suffix alone.
 3. Identify the account by provider + immutable Google subject, not email as a primary identity.

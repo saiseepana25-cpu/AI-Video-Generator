@@ -6,9 +6,9 @@ This is the source of truth for **development progress**: what exists, what was 
 
 ## Current focus
 
-**F01 — Application scaffold: complete.** The local Next.js shell is implemented and verified using the approved Midnight Frame theme. No provider calls, authentication, database, or publishing are part of this feature.
+**F02 — Individual Google sign-in and shared workspace access: in progress.** F02a authentication foundation is implemented: sign-in/setup/recovery UI, database-session integration, exact allowlist/membership guards, protected pages and `/api/v1/me`, and sign-out action. Real OAuth/database verification awaits local configuration and a user sign-in. Do not mark F02 complete based on unit tests alone.
 
-Next: **F02 — Individual Google sign-in and shared workspace access**.
+Next after F02: **F03 — Application database validators, indexes and transaction foundation**.
 
 ## Working agreement
 
@@ -28,6 +28,7 @@ Repository: [saiseepana25-cpu/AI-Video-Generator](https://github.com/saiseepana2
 | Checkpoint | Scope | Publication status |
 |---|---|---|
 | Initial baseline + F01 | Existing video prototype, approved requirements/contracts/design references, Next.js scaffold, status ledger and milestone push instructions | Published to `origin/dev` on 20 October 2026: [`05b4395`](https://github.com/saiseepana25-cpu/AI-Video-Generator/commit/05b4395879a1e235ac58feb9520ba06c4e1bef1a). Push succeeded and remote `refs/heads/dev` matched the full local commit hash |
+| F02a — authentication foundation | Server authorization, Google/MongoDB adapter wiring, sign-in states, setup guide, access-policy tests | Development checkpoint on `dev`; actual commit/push is recorded in Git history and the handoff. F02 live OAuth/database acceptance remains pending |
 
 The initial commit establishes the previously uncommitted project baseline. Its commit hash is recorded by Git rather than embedded in its own content. Future checkpoint rows identify the feature and verification; final handoffs report the actual pushed commit. A successful push and read-back of the remote ref are required to call a checkpoint published.
 
@@ -38,7 +39,7 @@ Public-source preparation: reviewed all 57 initial staged files (about 817 KB), 
 | ID | Small feature | Status | Completion evidence required |
 |---|---|---|---|
 | F01 | Next.js scaffold, Midnight Frame tokens, responsive shell and route placeholders | Complete | Production build and both typechecks passed; desktop/mobile/keyboard/HTTP checks passed; 15 prototype tests passed. Details below |
-| F02 | Google sign-in, operator allowlist, one shared workspace, sign-out | Planned | Allowed/denied users, session expiry, protected routes and API authorization; no public signup |
+| F02 | Google sign-in, operator allowlist, one shared workspace, sign-out | In progress | Allowed/denied users, session expiry, protected routes and API authorization; no public signup |
 | F03 | MongoDB connection, schema validation, index/bootstrap tooling and transaction foundation | Planned | Idempotent setup; schema/index checks against a test replica set; no network inside transactions |
 | F04 | Shared projects: create/list/detail, cursor pagination and real empty/search states | Planned | Team visibility, bounded validation, idempotency, authorization and cursor tests |
 | F05 | Saved brief: language/duration/voice/accent choices, autosave and conflict recovery | Planned | Same-language narration/subtitles; stale revision rejection; unsaved edit recovery |
@@ -79,6 +80,15 @@ Dependencies: F02 introduces the minimal MongoDB/Auth.js adapter wiring needed f
 
 ## UI / contract reconciliation decisions
 
+### F02 scope and acceptance
+
+- Auth.js Google provider and MongoDB adapter, database sessions with seven-day absolute expiry, minimum OpenID/email/profile scopes. Exact normalized allowlist and Google verified-email claim required before account/session creation.
+- Stable adapter user ID, one configured UUID workspace, atomic insert-only membership enrollment. Disabled members remain disabled on later sign-in. Every protected page/API checks current session, allowlist and active membership; revoked members lose new access and their sessions are deleted.
+- Sign-in, denied/error/setup states follow UI-01/UI-02 and Midnight Frame. No public signup/password/token-entry screens. Sign-out uses an Auth.js-protected POST.
+- Minimal auth-related indexes and workspace/membership documents follow DATABASE_DESIGN.md. Full application migration/schema infrastructure stays in F03.
+- Implement API-01 response/error envelope without leaking configuration, allowlist, OAuth/session tokens, or database rows. No fake identity or bypass account.
+- Verify access decisions, expired sessions, disabled membership, redirect validation, error sanitization and direct unauthorized HTTP access. Mark complete only after real configured Google sign-in, MongoDB session persistence and sign-out are verified. Tests with doubles do not satisfy live integration acceptance.
+
 The approved UI is being implemented against the existing contracts. No API operations or database fields are changed in F01.
 
 | Decision | Implementation rule |
@@ -113,9 +123,32 @@ The approved UI is being implemented against the existing contracts. No API oper
 
 **Review locally:** run `npm run web:dev` from the root and open <http://127.0.0.1:3000/projects>. The original experiment studio remains `npm run dev` at port 4310. A running preview is session-dependent, so the command is the reproducible entry point.
 
-**Remaining limits:** the three scaffold routes are not authenticated, contain no persisted workspace/project data, and cannot create, save, render, upload or publish. Calendar/Settings are explanatory placeholders. Error/loading components exist but forced-failure/recovery testing awaits real data flows. Reduced-motion CSS and focus styles are implemented; comprehensive accessibility testing remains in F20 and affected feature acceptance. No deployment performed.
+**F01 checkpoint limits (authorization superseded by F02 below):** at F01 the three scaffold routes were not authenticated and contained no persisted workspace/project data. Creation, saving, rendering, uploading and publishing remain later features. Calendar/Settings are explanatory placeholders. Error/loading components exist but forced-failure/recovery testing awaits real data flows. Reduced-motion CSS and focus styles are implemented; comprehensive accessibility testing remains in F20 and affected feature acceptance. No deployment performed.
 
 **Next feature F02:** implement Auth.js Google sign-in, verified-email/operator allowlist, minimal MongoDB adapter/database sessions, one shared workspace membership guard, protected routes and sign-out. First inspect local configuration by presence only; request missing Google OAuth/MongoDB settings without printing secrets. Do not use the Gemini API key as Google OAuth credentials. Acceptance must cover denied access and direct protected API requests, not only a successful sign-in screen.
+
+### F02a — authentication foundation, 20 October 2026
+
+**Implemented:**
+
+- [Auth.js configuration](apps/web/src/auth.ts), [restricted adapter](apps/web/src/server/auth/restricted-adapter.ts), [server configuration validation](apps/web/src/server/configuration/auth.ts), [access policy](apps/web/src/server/auth/access-policy.ts), [per-request workspace context](apps/web/src/server/auth/context.ts), [MongoDB auth store/index bootstrap](apps/web/src/server/db/auth-store.ts).
+- [Sign-in page](apps/web/src/app/sign-in/page.tsx), [same-origin sign-in/sign-out actions](apps/web/src/app/sign-in/actions.ts), [Auth.js route](apps/web/src/app/api/auth/[...nextauth]/route.ts), [API-01 /me](apps/web/src/app/api/v1/me/route.ts), [private error/success envelopes](apps/web/src/server/http/envelope.ts), and server-guarded studio layout/pages. No client-only login simulation or bypass account.
+- [AUTH_SETUP.md](AUTH_SETUP.md), key-free web environment example, locally generated ignored session secret, and `npm run web:auth:check` / optional `--database` read-only ping. Gemini/ElevenLabs keys remain separate.
+- Google identity requires verified email, exact subject/provider and exact normalized allowlist. Minimal account rows omit OAuth access/refresh/ID tokens and remote avatars. Membership enrollment uses insert-only defaults and never restores a disabled member. Session reads use a seven-day absolute database deadline; access removal revokes sessions on the next authorized request. No public registration or role-management feature.
+- Auth-related indexes are initialized before adapter writes: unique user email, provider/subject, session token and workspace/user membership; session user lookup and expiry TTL; membership status lookup. Adapter ObjectIds map to public hex strings; application workspace/membership IDs remain UUIDs and counters BSON Long. Full application validators/migrations remain F03.
+
+| Verification | Result / limits |
+|---|---|
+| `npm run web:test` | 14 tests passed: verified Google claims/provider/subject; exact allowlist and removal; malformed/expired sessions; disabled/wrong-workspace membership; safe redirects; denied enrollment before session creation; absolute expiry; omitted provider tokens/avatar; sanitized private API envelopes. Adapter tests use doubles, not a live database |
+| `npm run web:typecheck` and root `npm run typecheck` | Passed after auth changes |
+| `npm run web:build` | Production build passed with dynamic protected pages, `/sign-in`, Auth.js handlers and `/api/v1/me`. Sandbox initially blocked Turbopack's dependency junction; permitted build succeeded |
+| Unauthenticated HTTP checks | `/projects`, `/calendar`, `/settings` → 307 sign-in; `/api/v1/me` → 401 `AUTHENTICATION_REQUIRED` with metadata and `private, no-store`; `/sign-in` → 200 setup state. Checked response content against local secret values without displaying them |
+| Browser review | Inspected desktop sign-in and disabled setup state. At requested 390×844 and 320×740 viewports, content widths matched available 375px/305px after scrollbar. No horizontal overflow; visible Telugu footer/sample supported by the existing font setup. Fixed missing spaces when decorative line breaks are hidden on mobile. No live Google consent or authenticated dashboard session was exercised |
+| Local setup check | Correctly reports only missing names: Google client ID/secret, team allowlist and MongoDB URI. Session secret was generated directly in the ignored local file. No database ping/writes performed because configuration is incomplete |
+
+**Current external setup state:** user asked for guided help. Google Cloud opened to a first-time welcome/Terms of Service screen. No terms accepted, OAuth client created, account permissions changed or paid resources selected by the agent. User must review the Google terms before project/client setup can continue. Their choice has not been assumed. No secrets are requested in chat.
+
+**Remaining F02 acceptance:** configure the OAuth client/callback, database URI and allowed team emails locally; verify MongoDB connection/write/index permissions, approved Google login and stored session, unapproved/disabled account denial, session expiration/sign-out, and two individual users resolving the same workspace. These remain unverified, so F02 stays **In progress**. Do not advance to F03 as if authentication is complete. Next concrete action is guided Google OAuth setup, then MongoDB setup and live testing.
 
 ## Change log
 
@@ -124,3 +157,4 @@ The approved UI is being implemented against the existing contracts. No API oper
 | 20 October 2026 | Planning / F01 | User approved incremental feature delivery and this status ledger. Recorded the prior prototype separately from the new application; began scaffold |
 | 20 October 2026 | F01 complete | Added separate Next.js shell and local fonts, reusable UI, responsive routes and honest unavailable states; recorded design approval/reconciliation, fixed narrow navigation overflow, passed build/typechecks/15 regression tests and local browser/HTTP checks. Next: F02 |
 | 20 October 2026 | GitHub baseline | Created the user-requested `dev` branch, connected the empty public repository, committed/pushed baseline `05b4395` and verified its remote hash. Recorded the authorized commit/push rule in AGENTS.md and this ledger; environment variants remain ignored |
+| 20 October 2026 | F02a | Implemented and tested authentication foundation, protected routes/API and beginner setup guide. F02 remains in progress pending Google/MongoDB configuration and real session checks; user is reviewing why Google developer setup is needed |

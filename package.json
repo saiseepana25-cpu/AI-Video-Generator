@@ -9,6 +9,8 @@
     "web:build": "npm --prefix apps/web run build",
     "web:start": "npm --prefix apps/web run start",
     "web:typecheck": "npm --prefix apps/web run typecheck",
+    "web:test": "npm --prefix apps/web test",
+    "web:auth:check": "npm --prefix apps/web run auth:check --",
     "dev": "tsx scripts/local-server.ts",
     "start": "tsx scripts/local-server.ts",
     "doctor": "tsx scripts/cli.ts doctor",

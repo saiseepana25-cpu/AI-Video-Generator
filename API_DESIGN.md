@@ -334,6 +334,8 @@ Request: no body/query. **200 data:**
 
 These capability values illustrate an unavailable-integration state; they are computed from configuration/health, not hardcoded promises. Preferred defaults may be unresolved/null; generation cannot proceed with an unresolved voice. No team email list is returned.
 
+Implementation checkpoint F02: `/me` returns planning/generation disabled with `reasonCode:"FEATURE_NOT_IMPLEMENTED"` until their application features are connected. Existing CLI prototype capabilities do not make the dashboard generation API available. Private context is not returned until real authentication and active membership succeed.
+
 ### API-02 — `PATCH /api/v1/me/preferences`
 
 Request `{expectedRevision, patch}`; patch accepts only personal `language`, `voiceCatalogId`, and `timezone`, each nullable to clear override. No shared workspace default changes here.

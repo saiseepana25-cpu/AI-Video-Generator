@@ -2,7 +2,7 @@
 
 Development progress, feature scope, verification and next steps live in **[PROJECT_STATUS.md](PROJECT_STATUS.md)**. Update that file alongside each feature change.
 
-## Dashboard application — scaffold
+## Dashboard application — authentication foundation
 
 The new Next.js application lives in `apps/web`, separate from the existing video prototype. From the repository root:
 
@@ -11,15 +11,16 @@ npm ci --prefix apps/web
 npm run web:dev
 ```
 
-Open **http://127.0.0.1:3000**. The local scaffold provides the approved Midnight Frame shell and Projects / Calendar / Settings routes. These are explicitly labeled previews: authentication, project storage and generation are not wired to this application yet. Do not expose it as a signed-in service. The root URL temporarily redirects to Projects until the product homepage feature is built.
+Open **http://127.0.0.1:3000/sign-in**. The Midnight Frame sign-in flow and server authorization now protect Projects / Calendar / Settings. Follow **[AUTH_SETUP.md](AUTH_SETUP.md)** to configure the separate web environment file, Google OAuth client, exact team email allowlist and MongoDB database. Until setup is complete, sign-in remains disabled and private pages redirect to sign-in. This checkpoint is not yet a live-verified Google/MongoDB integration; see PROJECT_STATUS.md. Project storage and generation remain later features. The root URL temporarily redirects toward Projects until the product homepage feature is built.
 
 ```sh
 npm run web:typecheck
+npm run web:test
 npm run web:build
 npm run web:start
 ```
 
-The web application has its own package lock and React 19 dependencies. The root React 18/Remotion package and the commands below continue to run the prototype. Provider secrets remain in the ignored root `.env.local`; the scaffold does not read it or need credentials. Future web-only secrets belong in `apps/web/.env.local`, with a committed key-free example when that feature is introduced. Never use `NEXT_PUBLIC_` for secrets.
+The web application has its own package lock and React 19 dependencies. The root React 18/Remotion package and the commands below continue to run the prototype. AI provider secrets remain in the ignored root `.env.local`; the web app does not read it. Authentication settings belong in `apps/web/.env.local`; `apps/web/.env.example` lists key-free names. Never use `NEXT_PUBLIC_` for secrets. `npm run web:auth:check` validates setting presence/shape without printing values; `npm run web:auth:check -- --database` also performs a read-only MongoDB ping. Neither check substitutes for an actual Google sign-in and session/access test.
 
 ## Existing video pipeline prototype
 

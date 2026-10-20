@@ -1,6 +1,7 @@
 import type {Metadata} from 'next';
 import {Button, PageHeading, Panel} from '@/components/ui';
 import {Icon} from '@/components/icon';
+import {requireWorkspacePage} from '@/server/auth/context';
 
 export const metadata: Metadata = {title: 'Projects'};
 
@@ -17,10 +18,11 @@ function EmptyLibraryArtwork() {
   </svg>;
 }
 
-export default function ProjectsPage() {
+export default async function ProjectsPage() {
+  await requireWorkspacePage('/projects');
   return <>
     <PageHeading eyebrow="YOUR CREATIVE SPACE" title="Make your next idea move." description="Turn a simple concept into an explainer worth watching." action={<Button disabled aria-describedby="scaffold-notice"><Icon name="plus"/>Create video</Button>}/>
-    <p className="development-notice" id="scaffold-notice"><span className="notice-dot"/>Local scaffold — sign-in and project saving are the next features. Creation is not connected yet.</p>
+    <p className="development-notice" id="scaffold-notice"><span className="notice-dot"/>Dashboard foundation — project saving and video creation are not connected yet.</p>
     <Panel className="idea-panel" aria-labelledby="idea-heading">
       <div className="idea-intro"><span className="section-index">01 / THE STARTING POINT</span><h2 id="idea-heading">What would you like to explain?</h2><p>A curious question. A useful lesson. An idea that deserves a little clarity.</p></div>
       <label htmlFor="idea" className="sr-only">Your video idea</label>
@@ -28,7 +30,7 @@ export default function ProjectsPage() {
       <div className="idea-panel-bottom"><p id="idea-hint">One language for narration and subtitles.<span className="language-note">English <span aria-hidden="true">/</span> <span lang="te">తెలుగు</span></span></p><Button disabled aria-describedby="scaffold-notice">Plan my video<Icon name="arrow"/></Button></div>
     </Panel>
     <ol className="workflow" aria-label="Video creation workflow"><li><span className="workflow-number">01</span><div><strong>Plan</strong><p>Shape the idea. Review the story.</p></div></li><li><span className="workflow-number">02</span><div><strong>Generate</strong><p>Bring visuals and voice together.</p></div></li><li><span className="workflow-number">03</span><div><strong>Publish</strong><p>Review, download, then share.</p></div></li></ol>
-    <div className="section-heading"><h2>Your projects</h2><span className="neutral-badge">Workspace not connected</span></div>
+    <div className="section-heading"><h2>Your projects</h2><span className="neutral-badge">Project library coming next</span></div>
     <Panel className="empty-library" aria-labelledby="library-heading"><EmptyLibraryArtwork/><h3 id="library-heading">A home for your next big explanation.</h3><p>Your team’s saved ideas and finished videos will live here.<br className="desktop-break"/> Project storage will be connected in an upcoming feature.</p><span className="empty-footnote">No sample projects or generated videos are shown.</span></Panel>
   </>;
 }
