@@ -15,7 +15,8 @@
     "db:test:init": "tsx scripts/init-test-database.ts",
     "providers:check": "node --env-file-if-exists=.env.local --import tsx scripts/providers.ts check",
     "providers:probe": "node --env-file-if-exists=.env.local --import tsx scripts/providers.ts probe",
-    "providers:policy": "node --env-file-if-exists=.env.local --import tsx scripts/provider-policy.ts"
+    "providers:policy": "node --env-file-if-exists=.env.local --import tsx scripts/provider-policy.ts",
+    "planning": "node --env-file-if-exists=.env.local --import tsx scripts/planning.ts"
   },
   "dependencies": {
     "@auth/mongodb-adapter": "3.11.3",

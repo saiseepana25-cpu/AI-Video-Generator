@@ -16,7 +16,7 @@ export type ProjectSummary = {
 };
 export type ProjectDetail = ProjectSummary & {
   brief: {idea: string; audience: string; references: ProjectInput['references']}; settings: ProjectSettings;
-  currentPlanVersionId: null; currentPlanInputHash: null; activePlanningJobId: null;
+  currentPlanVersionId: string | null; currentPlanInputHash: null; activePlanningJobId: string | null;
   allowedActions: string[]; blockedReasons: {action: string; code: string; message: string}[];
 };
 export type ProjectPage = {items: ProjectSummary[]; page: {limit: number; hasMore: boolean; nextCursor: string | null}};

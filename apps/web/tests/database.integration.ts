@@ -235,6 +235,7 @@ describe('database foundation on a real local replica set', {concurrency: false}
     const partial = isolatedDb();
     await migrateDatabase(partial);
     // Simulate failure after project validator DDL but before receipt collection DDL.
+    await partial.collection<Row>('schema_migrations').deleteOne({_id: '006_ai_planning'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '003_project_editing'});
     await partial.collection<Row>('schema_migrations').updateOne({_id: projectMigration.id}, {$set: {state: 'failed'}});
     await partial.collection('idempotency_records').drop();

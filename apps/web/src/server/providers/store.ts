@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {Long, type Db} from 'mongodb';
+import {Long, type Db, type Document} from 'mongodb';
 import {providerConfig} from './config';
 import {ProviderFault, ProviderGateway, testPhrase, type Observation} from './gateway';
 import {voiceCatalog} from './catalog';
@@ -42,6 +42,15 @@ export class ProviderStore {
   async catalog(query: VoiceQuery) {
     await Promise.all([this.refresh('elevenlabs'), this.refresh('gemini')]);
     const rows = await this.db.collection<ProviderControl>('provider_controls').find({}).limit(2).toArray();
+    // Planning quota is an explicit short-lived operator observation. It does not
+    // alter provider metadata or clear the independent operator kill switch.
+    const budget = await this.db.collection<Document & {_id: string}>('planning_budget').findOne({_id: 'gemini'});
+    const gemini = rows.find(row => row._id === 'gemini');
+    if (gemini && !isOperatorDisabled(gemini) && gemini.reasonCode === 'FREE_ALLOWANCE_UNVERIFIED' && gemini.expiresAt > new Date() && budget?.configHash === gemini.configHash && budget.expiresAt > new Date() && !budget.paused && !budget.uncertain && budget.remaining > 0) {
+      gemini.state = 'enabled'; gemini.reasonCode = null;
+      gemini.allowance = {...gemini.allowance, observedRemaining: budget.remaining};
+      gemini.expiresAt = new Date(Math.min(gemini.expiresAt.getTime(), budget.expiresAt.getTime()));
+    }
     return voiceCatalog(query, rows, this.env);
   }
   async reserve(provider: Provider, units: number, probeLanguage?: Language) {

@@ -1,5 +1,7 @@
 # VideoCraft — V1 System Design
 
+F07 implementation note (20 October 2026): the local dashboard now has a separate MongoDB-backed planning worker (`npm run web:planning -- worker`). It snapshots saved brief/settings, calls Gemini outside transactions, validates bounded selected-language output and commits an immutable proposal guarded against newer edits. One global planning slot, durable submitted attempts and configuration-bound short-lived free quota are implemented. There is no inference in web handlers and no in-memory-only work queue. See the explicit staged proposal/API/database contracts at the top of API_DESIGN.md and DATABASE_DESIGN.md. The existing root video prototype is unchanged; dashboard review/edit/approval/render integration remain subsequent features. Conversation persistence is deferred rather than simulated.
+
 ## Document control
 
 | Field | Value |

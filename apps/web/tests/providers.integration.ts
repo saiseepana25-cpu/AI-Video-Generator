@@ -10,6 +10,7 @@ import {providerEnv, providerFixture, providerMock} from './fixtures/providers';
 import {testUserId, testWorkspaceId, workspaceFixture, membershipFixture, type Row} from './fixtures/database';
 import type {ProviderControl} from '../src/server/providers/contracts';
 import {providerCollections} from '../src/server/db/provider-schemas';
+import {editCollections} from '../src/server/db/edit-schemas';
 import {Long} from 'mongodb';
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Tests require isolated loopback MongoDB.');
@@ -77,6 +78,8 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
   test('migration preserves legacy disablement and catalog refresh cannot enable legacy or independent operator gates', async () => {
     await reset();
     // Reproduce an installed 004 database without modifying its immutable manifest.
+    await db.collection<Row>('schema_migrations').deleteOne({_id: '006_ai_planning'});
+    for (const contract of editCollections) await db.command({collMod: contract.name, validator: contract.validator});
     await db.command({collMod: 'provider_controls', validator: providerCollections[0].validator});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '005_provider_operator_policy'});
     await collection.updateOne({_id: 'elevenlabs'}, {$set: {state: 'disabled', expiresAt: new Date(0)}});

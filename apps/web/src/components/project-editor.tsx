@@ -8,6 +8,7 @@ import {Button, Panel} from './ui';
 import {DraftArtwork} from './project-library';
 import {CopyDraft} from './copy-draft';
 import {VoiceControls} from './voice-controls';
+import {PlanningPanel} from './planning-panel';
 
 type Mode = 'ready' | 'saving' | 'error' | 'session' | 'conflict' | 'review';
 type State = {base: ProjectDetail; draft: Draft; pending: PendingEdit | null; mode: Mode; message: string; latest: ProjectDetail | null};
@@ -16,6 +17,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
   const initial: State = {base: project, draft: editable(project), pending: null, mode: 'ready', message: '', latest: null};
   const [state, setState] = useState(initial), current = useRef(initial), busy = useRef(false);
   const [loaded, setLoaded] = useState(false), [recovery, setRecovery] = useState<Recovery | null>(null), [storageWarning, setStorageWarning] = useState('');
+  const [planningPending, setPlanningPending] = useState(false);
   const recoveryPending = useRef(false);
   const dirty = !sameDraft(state.base, state.draft);
   function update(next: State) {
@@ -82,7 +84,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
     update({...s, draft, mode: s.mode === 'error' && !s.pending ? 'ready' : s.mode, message: s.mode === 'error' && !s.pending ? '' : s.message});
   }
   const brief = state.draft.brief, settings = state.draft.settings;
-  const locked = !loaded || !!recovery || state.mode === 'conflict';
+  const locked = !loaded || !!recovery || state.mode === 'conflict' || planningPending;
   const status = recovery ? 'Local draft available' : state.mode === 'saving' ? 'Saving…' : state.mode === 'review' ? 'Review your edits · autosave paused' : state.mode === 'conflict' ? 'Newer saved version · resolve changes' : state.mode === 'error' || state.mode === 'session' ? 'Changes not confirmed' : dirty ? 'Unsaved changes' : 'All changes saved';
   return <div className="project-detail-grid">
     <Panel className="project-idea draft-editor" aria-labelledby="edit-idea-heading">
@@ -104,7 +106,14 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
         <details className="editor-references"><summary>References · {brief.references.length} / 10</summary><p className="muted-copy">Paste source text. Optional URLs record provenance; pages are not fetched.</p>{brief.references.map((ref, i) => <div className="reference-edit" key={ref.referenceId}><label htmlFor={`ref-${ref.referenceId}`}>Reference {i + 1}<textarea id={`ref-${ref.referenceId}`} rows={3} value={ref.text} onChange={e => edit({...state.draft, brief: {...brief, references: brief.references.map(r => r.referenceId === ref.referenceId ? {...r, text: e.target.value} : r)}})}/></label><label>Source URL (optional)<input value={ref.suppliedUrl ?? ''} onChange={e => edit({...state.draft, brief: {...brief, references: brief.references.map(r => r.referenceId === ref.referenceId ? {...r, suppliedUrl: e.target.value || null} : r)}})}/></label><Button variant="secondary" onClick={() => edit({...state.draft, brief: {...brief, references: brief.references.filter(r => r.referenceId !== ref.referenceId)}})}>Remove reference {i + 1}</Button></div>)}<Button variant="secondary" disabled={brief.references.length >= 10} onClick={() => edit({...state.draft, brief: {...brief, references: [...brief.references, {referenceId: `ref_${crypto.randomUUID()}`, text: '', suppliedUrl: null}]}})}>Add reference</Button></details>
       </fieldset>
       {state.mode === 'review' && <div className="recovery-panel"><p>Review is paused. Saving will replace the saved brief/options with the edits shown above.</p><Button onClick={() => void save()}>Save my edits</Button></div>}
-      <div className="project-next-note" id="planning-notice"><strong>Your next step: the plan.</strong><p>AI planning will be connected in a later feature.</p></div><Button disabled aria-describedby="planning-notice">Prepare my plan</Button>
+      <PlanningPanel projectId={project.id} revision={state.base.revision} briefRevision={state.base.briefRevision} scope={scope}
+        ready={loaded && !recovery && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
+        onIdea={(angle, jobId) => {
+          if (busy.current || dirty || state.pending || planningPending) return;
+          const draft = {...editable(state.base), brief: {...state.base.brief, idea: `${angle.title}\n${angle.hook}\n${angle.learningObjective}`}};
+          const command: PendingEdit = {key: crypto.randomUUID(), body: {expectedProjectRevision: state.base.revision, patch: {brief: draft.brief, brainstormSelection: {jobId, angleId: angle.id}}}, submitted: editable(draft)};
+          update({...current.current, draft, pending: command, mode: 'ready', message: ''});
+        }}/>
     </Panel>
     <aside className="project-side"><Panel className="project-visual"><DraftArtwork large/><h3>From idea to understanding.</h3><p>Your visual explanation will take shape here.</p></Panel><Panel className="project-settings"><h2>Video details</h2><dl className="project-facts"><div><dt>Language & subtitles</dt><dd>{settings.language === 'te' ? 'తెలుగు · Telugu' : 'English'}</dd></div><div><dt>Target length</dt><dd>{settings.targetSeconds} seconds</dd></div><div><dt>Saved revision</dt><dd>{state.base.revision}</dd></div></dl><p className="muted-copy">Clean educational visuals · Readable captions</p>{(dirty || state.pending || storageWarning) && <CopyDraft text={JSON.stringify(state.draft, null, 2)}/>}</Panel></aside>
   </div>;

@@ -37,7 +37,9 @@ export function readRecovery(raw: string | null, scope: string, projectId: strin
       if (!record(value.pending) || typeof value.pending.key !== 'string' || !/^[0-9a-f-]{36}$/.test(value.pending.key) || !boundedDraft(value.pending.submitted)) return null;
       if (!record(value.pending.body) || Object.keys(value.pending.body).sort().join(',') !== 'expectedProjectRevision,patch' || !record(value.pending.body.patch)) return null;
       // The receipt must belong to this exact recovered base/command.
-      if (value.pending.body.expectedProjectRevision !== value.base.revision || JSON.stringify(changes(value.base, value.pending.submitted)) !== JSON.stringify(value.pending.body.patch)) return null;
+      const {brainstormSelection, ...patch} = value.pending.body.patch;
+      if (brainstormSelection !== undefined && (!record(brainstormSelection) || Object.keys(brainstormSelection).sort().join(',') !== 'angleId,jobId' || typeof brainstormSelection.jobId !== 'string' || !/^[0-9a-f-]{36}$/.test(brainstormSelection.jobId) || !/^angle_[123]$/.test(brainstormSelection.angleId) || !patch.brief)) return null;
+      if (value.pending.body.expectedProjectRevision !== value.base.revision || JSON.stringify(changes(value.base, value.pending.submitted)) !== JSON.stringify(patch)) return null;
     }
     return value;
   } catch {return null;}

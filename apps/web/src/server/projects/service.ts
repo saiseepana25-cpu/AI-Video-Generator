@@ -3,6 +3,7 @@ import {Long, ObjectId, type ClientSession, type Db, type Document, type MongoCl
 import {databaseTransaction} from '../db/transactions';
 import {assertVoiceSelection} from '../providers/catalog';
 import type {Env} from '../providers/contracts';
+import type {Job} from '../planning/contracts';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
 import {ProjectError, requireProjectId, type ProjectContext, type ProjectDetail, type ProjectInput, type ProjectPage, type ProjectSummary} from './contracts';
 import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
@@ -50,9 +51,8 @@ export class ProjectService {
 
   private detail(row: ProjectRecord, names: Map<string, string>): ProjectDetail {
     return {...this.summary(row, names), brief: row.brief, settings: row.settings,
-      currentPlanVersionId: null, currentPlanInputHash: null, activePlanningJobId: null, allowedActions: ['edit'],
+      currentPlanVersionId: row.currentPlanVersionId ?? null, currentPlanInputHash: null, activePlanningJobId: row.activePlanningJobId ?? null, allowedActions: ['edit'],
       blockedReasons: [
-        {action: 'create_plan', code: 'FEATURE_NOT_IMPLEMENTED', message: 'AI planning is not connected yet.'},
         {action: 'generate', code: 'FEATURE_NOT_IMPLEMENTED', message: 'Dashboard generation is not connected yet.'},
       ]};
   }
@@ -168,14 +168,20 @@ export class ProjectService {
             {currentRevision: current.revision, updatedAt: current.updatedAt, updatedBy: current.updatedBy});
         }
         const brief = input.patch.brief ?? row.brief, settings = input.patch.settings ?? row.settings;
+        if (input.patch.brainstormSelection) {
+          const selection = input.patch.brainstormSelection;
+          const source = await db.collection<Job>('jobs').findOne({_id: selection.jobId, workspaceId: this.context.workspaceId, projectId: id, kind: 'brainstorm', state: 'ready', sourceBriefRevision: row.briefRevision}, {session});
+          const angle = source?.result && 'angles' in source.result ? source.result.angles.find(a => a.id === selection.angleId) : null;
+          if (!angle || brief.idea !== `${angle.title}\n${angle.hook}\n${angle.learningObjective}`) throw new ProjectError('INVALID_BRAINSTORM_SELECTION', 422, 'Use a current saved angle from this project.');
+        }
         const changed = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
         let saved = row;
         if (changed) {
           if (JSON.stringify(settings) !== JSON.stringify(row.settings)) await assertVoiceSelection(db, settings, this.providerEnv, session);
-          if (['currentPlanVersionId', 'latestRunId', 'latestReadyVideoId', 'activePlanningJobId', 'planningRequestId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing planned or generated projects is not available yet.');
+          if (['latestRunId', 'latestReadyVideoId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing generated projects is not available yet.');
           if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
           const updated = await db.collection<ProjectRecord>('projects').findOneAndUpdate({...filter, revision: Long.fromNumber(input.expectedProjectRevision)}, {
-            $set: {brief, settings, updatedAt: now, updatedBy: actor}, $inc: {revision: Long.ONE, briefRevision: Long.ONE, guardRevision: Long.ONE},
+            $set: {brief, settings, updatedAt: now, updatedBy: actor, activePlanningJobId: null, planningRequestId: null}, $inc: {revision: Long.ONE, briefRevision: Long.ONE, guardRevision: Long.ONE},
           }, {session, returnDocument: 'after'});
           if (!updated) throw new ProjectError('STALE_REVISION', 409, 'Reload and review the latest saved changes.');
           saved = updated;

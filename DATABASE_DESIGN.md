@@ -1,5 +1,22 @@
 # VideoCraft — V1 Database Design
 
+## F07 deployed slice — migration 006
+
+Migration `006_ai_planning` adds strict bounded validators and named indexes for `jobs`, `plan_versions`, `planning_commands`, `planning_budget`, `worker_slots`, and `stage_attempts`; widens project replay snapshots for nullable UUID plan/active-job pointers and activity type `planning_changed`. Manifests 001–005 remain immutable. These collections currently implement only the planning slice below; later execution/publishing fields in this document require explicit later migrations.
+
+| Collection | Implemented authority and constraints |
+|---|---|
+| jobs | UUID, workspace/project/actor, kind brainstorm/plan, key/request/input hashes, immutable saved input/source revision/request ID; BSON Long status revision; queued/running/ready/failed/paused/cancelled/cancellation_requested/superseded; bounded attempt 0–3; submission none/submitted/settled/uncertain; owner UUID/lease; result/safe error/timestamps. Unique workspace/user/project/kind/keyHash, queue state/createdAt, workspace/project chronological indexes |
+| plan_versions | Insert-only in domain service; UUID/workspace/project, unique project version Long and unique source planning request; saved-input hash, source revision, unresolved settings snapshot, bounded proposal format, exact model/prompt contract and creator/time. No generation approval or final timing |
+| planning_commands | Unique workspace/user/action-resource scope/key hash; request hash and original small AcceptedJob snapshot. No TTL yet. Checked before provider/revision state, with current access recheck |
+| planning_budget | `_id:gemini`, configuration hash, Long revision, operator observation/expiry, integer remaining 0–500, nextRequestAt, paused/uncertain. Short-lived manual observation; reservation decrement is atomic with submitted attempt/job. No refund of submitted requests and no uncertainty-clearing re-attestation |
+| worker_slots | `_id:planning:global` exception to UUIDs; owner UUID, expiry and heartbeat. One planning executor; 90-second lease, 10-second in-call heartbeats. Worker CLI renews when idle; reads require heartbeat newer than 30 seconds |
+| stage_attempts | UUID, unique job/attempt, owner, submitted/settled/uncertain and timestamps. Prepared/claim/submitted are committed together before network; there is no separately reclaimable prepared attempt in this slice |
+
+Job acceptance writes the project request/active pointer, job, command receipt and workspace activity sequence/event in one transaction. Cancellation/retry changes and receipt are atomic. Submission conditionally decrements the free budget, checks the independent operator provider gate with a write, persists the attempt and job lease before the external call. No provider call runs inside a transaction. The worker uses a single global lease; each unique per-process owner UUID acts as fencing identity. Submission/finalization write the owned nonexpired slot, and finalization requires matching job owner/attempt/live lease. Heartbeats do not advance visible status revision. Expired submitted work becomes unknown, pauses the budget and is never resent blindly. A replacement executor cannot adopt an expired request for inference.
+
+Finalization commits immutable proposal + project version counter/current pointer + job result + activity together, guarded by live project, active membership, source brief revision and current planning request/active job. Edits increment brief/project/guard revisions and clear request/active pointers; old proposal stays readable and late work becomes superseded. Active pointer is cleared only if still pointing at that job. This slice has a separate planning worker; render/publishing executors are not implemented. Strict validators protect shapes, domain services enforce relationships/transitions; deployment roles must eventually restrict arbitrary writes to insert-only collections.
+
 ## Document control
 
 | Field | Value |

@@ -5,6 +5,7 @@ import {projectCollections} from './project-schemas';
 import {editCollections} from './edit-schemas';
 import {providerCollections} from './provider-schemas';
 import {providerPolicyCollections} from './provider-policy-schemas';
+import {planningCollections} from './planning-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -28,6 +29,7 @@ const migrations = [
   {definition: editMigration, checksum: editChecksum},
   {definition: {id: '004_provider_catalog', description: 'Provider observations, voice tests and conservative free reservations', contracts: providerCollections}, checksum: createHash('sha256').update(JSON.stringify(providerCollections)).digest('hex')},
   {definition: {id: '005_provider_operator_policy', description: 'Independent operator disablement preserving legacy provider rows', contracts: providerPolicyCollections}, checksum: createHash('sha256').update(JSON.stringify(providerPolicyCollections)).digest('hex')},
+  {definition: {id: '006_ai_planning', description: 'Durable planning jobs, immutable proposals, worker ownership and free budget', contracts: planningCollections}, checksum: createHash('sha256').update(JSON.stringify(planningCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

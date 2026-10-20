@@ -326,6 +326,20 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 .conflict-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-draft { max-width: 100%; }
 .voice-controls { margin-top: 20px; padding-top: 4px; border-top: 1px solid #343946; }
+.planning-panel { border-top: 1px solid #343946; padding-top: 28px; margin-top: 32px; min-width: 0; overflow-wrap: anywhere; }
+.planning-panel h2 { font-size: 22px; line-height: 1.4; margin: 12px 0; }
+.planning-status { margin-top: 24px; padding: 18px; background: #242936; border-radius: 12px; }
+.planning-angles { display: grid; gap: 16px; margin-top: 20px; }
+.planning-angles article, .plan-scene { border: 1px solid #343946; border-radius: 12px; padding: 20px; margin-top: 16px; min-width: 0; }
+.planning-angles h3, .plan-scene h4 { line-height: 1.6; margin: 8px 0; }
+.plan-preview { margin-top: 28px; }
+.plan-preview p, .planning-angles p { font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
+.plan-preview summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-size: 13px; color: #7EDDCF; }
+.diagram-proposal { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px 0; }
+.diagram-proposal span { flex: 1 1 95px; text-align: center; padding: 14px; border: 1px solid #B7A4FF; border-radius: 12px; color: #F4F2FA; background: #242936; font-size: 13px; line-height: 1.7; }
+.diagram-sequence span:not(:last-child)::after { content: ' →'; color: #7EDDCF; }
+.diagram-cycle { border: 1px dashed #7EDDCF; border-radius: 20px; padding: 16px; }
+.diagram-comparison span:nth-child(even) { border-color: #7EDDCF; }
 .catalog-status { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .catalog-status p { margin: 8px 0; }
 .catalog-status .button { margin: 12px 0; }

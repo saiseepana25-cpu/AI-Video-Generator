@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {checkDatabase, migrateDatabase} from '../src/server/db/migrations';
-import {editCollections} from '../src/server/db/edit-schemas';
+import {planningCollections} from '../src/server/db/planning-schemas';
 import {ProjectService} from '../src/server/projects/service';
 import {ProjectError, type ProjectContext} from '../src/server/projects/contracts';
 import {parseListOptions} from '../src/server/projects/validation';
@@ -152,7 +152,7 @@ describe('shared project library on a real local replica set', {concurrency: fal
   test('an event-write failure rolls back project, command receipt and counter together', async () => {
     const projects = await db.collection('projects').countDocuments(), receipts = await db.collection('idempotency_records').countDocuments();
     const previous = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
-    const eventContract = editCollections.find(contract => contract.name === 'activity_events')!;
+    const eventContract = planningCollections.find(contract => contract.name === 'activity_events')!;
     await db.command({collMod: 'activity_events', validator: {$jsonSchema: {bsonType: 'object', required: ['controlled_failure']}}});
     try {await assert.rejects(service.create(input(), randomUUID()), error => !!error && typeof error === 'object' && 'code' in error && error.code === 121);}
     finally {await db.command({collMod: 'activity_events', validator: eventContract.validator});}
@@ -203,7 +203,7 @@ describe('shared project library on a real local replica set', {concurrency: fal
   test('failed edit receipt rolls back the project, activity and workspace counter', async () => {
     const first = (await service.create(input(), randomUUID())).project;
     const before = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
-    const receipt = editCollections.find(c => c.name === 'idempotency_records')!;
+    const receipt = planningCollections.find(c => c.name === 'idempotency_records')!;
     await db.command({collMod: 'idempotency_records', validator: {$jsonSchema: {bsonType: 'object', required: ['controlled_failure']}}});
     try {await assert.rejects(service.patch(first.id, {expectedProjectRevision: 1, patch: {brief: {...first.brief, idea: 'Must roll back'}}}, randomUUID()));}
     finally {await db.command({collMod: 'idempotency_records', validator: receipt.validator});}

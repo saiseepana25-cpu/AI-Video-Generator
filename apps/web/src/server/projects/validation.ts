@@ -70,12 +70,12 @@ export function parseProjectInput(value: unknown): ProjectInput {
 }
 
 export type ListOptions = {q: string; limit: number; cursor: string | null; order: 'updated_desc'};
-export type ProjectPatch = {expectedProjectRevision: number; patch: {brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']}};
+export type ProjectPatch = {expectedProjectRevision: number; patch: {brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']; brainstormSelection?: {jobId: string; angleId: string}}};
 export function parseProjectPatch(value: unknown): ProjectPatch {
   const body = object(value, ['expectedProjectRevision', 'patch'], '/');
   if (body.expectedProjectRevision === undefined) throw new ProjectError('PRECONDITION_REQUIRED', 428, 'Include the saved project revision.');
   if (!Number.isSafeInteger(body.expectedProjectRevision) || (body.expectedProjectRevision as number) < 1) fail('/expectedProjectRevision', 'Use a positive safe integer revision.');
-  const raw = object(body.patch, ['brief', 'settings'], '/patch');
+  const raw = object(body.patch, ['brief', 'settings', 'brainstormSelection'], '/patch');
   if (!Object.keys(raw).length) fail('/patch', 'Include a brief or settings replacement.');
   const patch: ProjectPatch['patch'] = {};
   const defaults = {language: 'en', targetSeconds: 60, accentId: null, voiceCatalogId: null, brandKitRevisionId: null, themeId: 'clean-educational-v1', captionStyleId: 'readable-default-v1'};
@@ -86,6 +86,11 @@ export function parseProjectPatch(value: unknown): ProjectPatch {
     patch.brief = {idea: checked.idea, audience: checked.audience, references: checked.references};
   }
   if ('settings' in raw) patch.settings = parseProjectInput({idea: 'Validation', settings: raw.settings}).settings;
+  if ('brainstormSelection' in raw) {
+    const selected = object(raw.brainstormSelection, ['jobId', 'angleId'], '/patch/brainstormSelection');
+    if (!patch.brief || typeof selected.jobId !== 'string' || !uuidPattern.test(selected.jobId) || typeof selected.angleId !== 'string' || !/^angle_[123]$/.test(selected.angleId)) fail('/patch/brainstormSelection', 'Choose a saved angle and include the resulting brief.');
+    patch.brainstormSelection = {jobId: selected.jobId as string, angleId: selected.angleId as string};
+  }
   return {expectedProjectRevision: body.expectedProjectRevision as number, patch};
 }
 export function parseListOptions(params: URLSearchParams): ListOptions {
