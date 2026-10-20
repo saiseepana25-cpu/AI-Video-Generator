@@ -5,6 +5,7 @@ import type {ProjectSettings} from '@/server/projects/contracts';
 import type {VoiceCatalog} from '@/server/providers/contracts';
 import {Button} from './ui';
 export const voiceReason = (code: string | null) => ({
+  PROVIDER_DISABLED: 'Provider is disabled',
   INTEGRATION_NOT_CONFIGURED: 'Connection not configured', FREE_TIER_UNCONFIRMED: 'Free access needs confirmation', MODEL_UNREVIEWED: 'Model needs review',
   CAPABILITY_UNVERIFIED: 'Availability needs checking', CAPABILITY_STALE: 'Availability needs refreshing', FREE_ALLOWANCE_EXHAUSTED: 'Free allowance exhausted', FREE_ALLOWANCE_UNVERIFIED: 'Free allowance could not be verified',
   PROVIDER_AUTH_INVALID: 'Connection needs attention', PROVIDER_ACCESS_DENIED: 'Access denied', PAID_ACCOUNT_BLOCKED: 'Account does not match free testing policy', PAID_ACCESS_BLOCKED: 'Paid access is blocked',

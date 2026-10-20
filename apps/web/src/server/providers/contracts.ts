@@ -8,10 +8,12 @@ export type Reservation = {id: string; units: number; state: 'reserved' | 'settl
 export type ProviderControl = {
   _id: Provider; schemaVersion: 1; configHash: string; revision: Long; model: string;
   state: 'enabled' | 'paused' | 'disabled'; reasonCode: string | null;
+  operatorDisabled?: boolean; // Optional only for pre-005 rows; legacy disabled state is fail-closed.
   checkedAt: Date; expiresAt: Date; languages: Language[];
   allowance: {unit: 'credits' | 'requests'; observedRemaining: number | null; periodId: string | null};
   tests: {language: Language; testedAt: Date}[]; reservations: Reservation[];
 };
+export const isOperatorDisabled = (row: ProviderControl | null | undefined) => row?.operatorDisabled === true || row?.state === 'disabled';
 export type VoiceItem = {id: VoiceId; name: string; provider: 'elevenlabs'; model: string; supportedAccentIds: string[];
   testedForLanguage: boolean; nativeAccentVerified: false; usagePolicy: 'evaluation_only'; available: boolean; reasonCode: string | null; sampleAssetId: null};
 export type ProviderSummary = {provider: Provider; model: string; state: 'enabled' | 'paused' | 'disabled'; reasonCode: string | null;

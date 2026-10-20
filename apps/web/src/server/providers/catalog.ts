@@ -2,6 +2,7 @@ import type {ClientSession, Db} from 'mongodb';
 import {ProjectError, type ProjectSettings} from '../projects/contracts';
 import {providerConfig} from './config';
 import type {Env, Provider, ProviderControl, ProviderSummary, VoiceCatalog, VoiceQuery} from './contracts';
+import {isOperatorDisabled} from './contracts';
 
 export function parseVoiceQuery(params: URLSearchParams): VoiceQuery {
   for (const key of params.keys()) if (!['language', 'accentId', 'intendedUse', 'includeUnavailable'].includes(key) || params.getAll(key).length !== 1) throw new ProjectError('INVALID_QUERY', 400, 'Use supported catalog fields once each.');
@@ -11,10 +12,11 @@ export function parseVoiceQuery(params: URLSearchParams): VoiceQuery {
 }
 export function providerSummary(provider: Provider, row: ProviderControl | null, env: Env, now = new Date()): ProviderSummary {
   const config = providerConfig(provider, env);
-  let reason = !config.key ? 'INTEGRATION_NOT_CONFIGURED' : !config.confirmedFree ? 'FREE_TIER_UNCONFIRMED' : !config.reviewed ? 'MODEL_UNREVIEWED' : !row || row.configHash !== config.configHash ? 'CAPABILITY_UNVERIFIED' : row.expiresAt <= now ? 'CAPABILITY_STALE' : row.reasonCode ?? (row.state !== 'enabled' ? 'PROVIDER_PAUSED' : null);
+  const disabled = isOperatorDisabled(row);
+  let reason = disabled ? 'PROVIDER_DISABLED' : !config.key ? 'INTEGRATION_NOT_CONFIGURED' : !config.confirmedFree ? 'FREE_TIER_UNCONFIRMED' : !config.reviewed ? 'MODEL_UNREVIEWED' : !row || row.configHash !== config.configHash ? 'CAPABILITY_UNVERIFIED' : row.expiresAt <= now ? 'CAPABILITY_STALE' : row.reasonCode ?? (row.state !== 'enabled' ? 'PROVIDER_PAUSED' : null);
   if (!reason && provider === 'gemini' && row?.allowance.observedRemaining === null) reason = 'FREE_ALLOWANCE_UNVERIFIED';
   if (!reason && provider === 'elevenlabs' && (row?.allowance.observedRemaining ?? 0) <= 0) reason = 'FREE_ALLOWANCE_EXHAUSTED';
-  return {provider, model: config.model, state: reason ? 'paused' : 'enabled', reasonCode: reason,
+  return {provider, model: config.model, state: disabled ? 'disabled' : reason ? 'paused' : 'enabled', reasonCode: reason,
     checkedAt: row?.configHash === config.configHash ? row.checkedAt.toISOString() : null, expiresAt: row?.configHash === config.configHash ? row.expiresAt.toISOString() : null,
     allowance: {unit: provider === 'elevenlabs' ? 'credits' : 'requests', remaining: !reason && row ? row.allowance.observedRemaining : null}, usagePolicy: 'evaluation_only'};
 }

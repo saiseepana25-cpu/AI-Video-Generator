@@ -17,6 +17,7 @@
     "web:db:test:init": "npm --prefix apps/web run db:test:init",
     "web:providers:check": "npm --prefix apps/web run providers:check",
     "web:providers:probe": "npm --prefix apps/web run providers:probe --",
+    "web:providers:policy": "npm --prefix apps/web run providers:policy --",
     "dev": "tsx scripts/local-server.ts",
     "start": "tsx scripts/local-server.ts",
     "doctor": "tsx scripts/cli.ts doctor",

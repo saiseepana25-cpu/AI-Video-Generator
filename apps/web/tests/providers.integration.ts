@@ -9,6 +9,8 @@ import {ProjectService} from '../src/server/projects/service';
 import {providerEnv, providerFixture, providerMock} from './fixtures/providers';
 import {testUserId, testWorkspaceId, workspaceFixture, membershipFixture, type Row} from './fixtures/database';
 import type {ProviderControl} from '../src/server/providers/contracts';
+import {providerCollections} from '../src/server/db/provider-schemas';
+import {Long} from 'mongodb';
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Tests require isolated loopback MongoDB.');
 const client = new MongoClient(uri, databaseClientOptions), name = `videocraft_f06_test_${randomUUID().replaceAll('-', '')}`, db = client.db(name), collection = db.collection<ProviderControl>('provider_controls');
@@ -71,5 +73,63 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
     await assert.rejects(service.patch(created.project.id, {expectedProjectRevision: 1, patch: {settings: {...settings, targetSeconds: 60}}}, randomUUID()), /unavailable/);
     const cleared = await service.patch(created.project.id, {expectedProjectRevision: 1, patch: {settings: {...settings, voiceCatalogId: null, accentId: null}}}, randomUUID());
     assert.equal(cleared.project.revision, 2);
+  });
+  test('migration preserves legacy disablement and catalog refresh cannot enable legacy or independent operator gates', async () => {
+    await reset();
+    // Reproduce an installed 004 database without modifying its immutable manifest.
+    await db.command({collMod: 'provider_controls', validator: providerCollections[0].validator});
+    await db.collection<Row>('schema_migrations').deleteOne({_id: '005_provider_operator_policy'});
+    await collection.updateOne({_id: 'elevenlabs'}, {$set: {state: 'disabled', expiresAt: new Date(0)}});
+    await migrateDatabase(db);
+    for (const legacy of [true, false]) {
+      if (!legacy) await collection.updateOne({_id: 'elevenlabs'}, {$set: {state: 'enabled', operatorDisabled: true, expiresAt: new Date(0)}});
+      const calls: {url: string; method: string}[] = [], store = new ProviderStore(db, providerEnv, providerMock(calls));
+      const catalog = await store.catalog({language: 'te', accentId: null, intendedUse: 'evaluation', includeUnavailable: true});
+      const row = await collection.findOne({_id: 'elevenlabs'});
+      assert.equal(row?.state, 'enabled'); assert.equal(row?.operatorDisabled, true);
+      assert.equal(catalog.providers[0].state, 'disabled'); assert.equal(catalog.items[0].available, false);
+      await store.refresh('elevenlabs', true);
+      await assert.rejects(store.reserve('elevenlabs', 1), /FREE_ALLOWANCE_UNAVAILABLE/);
+      await assert.rejects(store.probe('te'), /PROVIDER_DISABLED/);
+      assert.ok(calls.every(c => c.method === 'GET'));
+    }
+  });
+  test('operator disablement written during metadata reads wins even without a legacy revision increment', async () => {
+    for (const policy of [{state: 'disabled' as const}, {operatorDisabled: true}]) {
+      await reset(); let release!: () => void, started!: () => void;
+      const waiting = new Promise<void>(r => {release = r;}), ready = new Promise<void>(r => {started = r;});
+      const mock = providerMock([]), delayed = (async (url, options) => {if (String(url).endsWith('/subscription')) {started(); await waiting;} return mock(url, options);}) as typeof fetch;
+      const store = new ProviderStore(db, providerEnv, delayed), refresh = store.refresh('elevenlabs', true);
+      await ready; await collection.updateOne({_id: 'elevenlabs'}, {$set: policy}); release(); await refresh;
+      const row = await collection.findOne({_id: 'elevenlabs'});
+      if ('state' in policy) assert.equal(row?.state, 'disabled'); else assert.equal(row?.operatorDisabled, true);
+      await assert.rejects(store.reserve('elevenlabs', 1));
+    }
+  });
+  test('only explicit revision-checked enablement clears policy and still requires a fresh observation', async () => {
+    await reset(); const store = new ProviderStore(db, providerEnv, providerMock([]));
+    await store.setOperatorEnabled('elevenlabs', false, 1);
+    await assert.rejects(store.setOperatorEnabled('elevenlabs', true, 1), /PROVIDER_STATE_CHANGED/);
+    await store.refresh('elevenlabs', true);
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.operatorDisabled, true);
+    const before = await collection.findOne({_id: 'elevenlabs'});
+    await store.setOperatorEnabled('elevenlabs', true, before!.revision.toNumber());
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.state, 'paused');
+    await assert.rejects(store.reserve('elevenlabs', 1));
+    await store.refresh('elevenlabs'); await store.reserve('elevenlabs', 1);
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.operatorDisabled, false);
+  });
+  test('a failed in-flight speech probe cannot overwrite a legacy operator kill switch', async () => {
+    await reset(); await collection.updateOne({_id: 'elevenlabs'}, {$set: {tests: []}});
+    const store = new ProviderStore(db, providerEnv, providerMock([], {post: async () => {
+      await collection.updateOne({_id: 'elevenlabs'}, {$set: {state: 'disabled'}, $inc: {revision: Long.ONE}});
+      throw new Error('Test connection interruption');
+    }}));
+    await assert.rejects(store.probe('te'), /PROVIDER_UNREACHABLE/);
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.state, 'disabled');
+    await store.refresh('elevenlabs', true);
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.operatorDisabled, true);
+    assert.equal((await collection.findOne({_id: 'elevenlabs'}))?.reservations[0].state, 'uncertain');
+    await assert.rejects(store.reserve('elevenlabs', 1));
   });
 });

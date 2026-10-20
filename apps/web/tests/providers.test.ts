@@ -9,6 +9,13 @@ test('voice query bounds language, use, accent and duplicate/unknown fields', ()
   for (const raw of ['', 'language=hi', 'language=te&language=en', 'language=en&includeUnavailable=1', 'language=en&intendedUse=commercial', 'language=en&accentId=arbitrary', 'language=te&token=hidden']) assert.throws(() => parseVoiceQuery(new URLSearchParams(raw)));
   assert.equal(parseVoiceQuery(new URLSearchParams('language=en')).includeUnavailable, false);
 });
+test('operator disablement takes precedence over healthy observations, expiry and configuration changes', () => {
+  const row = providerFixture();
+  for (const disabled of [{...row, operatorDisabled: true}, {...row, state: 'disabled' as const}, {...row, operatorDisabled: true, expiresAt: new Date(0), configHash: '0'.repeat(64)}]) {
+    const catalog = voiceCatalog(query(), [disabled], providerEnv);
+    assert.equal(catalog.providers[0].state, 'disabled'); assert.equal(catalog.providers[0].reasonCode, 'PROVIDER_DISABLED'); assert.equal(catalog.items[0].available, false);
+  }
+});
 test('catalog requires current tested language, free capacity and exact configuration; no public provider IDs or secrets', () => {
   const row = providerFixture();
   assert.equal(voiceCatalog(query(), [row], providerEnv).items[0].available, true);
