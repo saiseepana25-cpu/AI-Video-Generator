@@ -41,7 +41,21 @@ export const {handlers, auth, signIn, signOut} = NextAuth(async () => {
     },
     logger:{
       // Library errors can contain provider tokens/URI details in their causes.
-      error() { console.error('[auth] Authentication failed; details redacted.'); },
+      error(error) {
+        const known = ['CallbackRouteError','OAuthCallbackError','OAuthAccountNotLinked','AdapterError','AccessDenied','InvalidCheck','OAuthSignInError','Configuration'];
+        const authError = error as Error & {type?:string;cause?:{err?:unknown}};
+        const type = authError.type && known.includes(authError.type) ? authError.type : 'AuthenticationError';
+        console.error(`[auth] ${type}; details redacted.`);
+        const cause = authError.cause?.err;
+        if (cause instanceof Error) {
+          const allowedNames = ['TypeError','ReferenceError','OperationProcessingError','ResponseBodyError','MongoServerError'];
+          const category = allowedNames.includes(cause.name) ? cause.name : 'Error';
+          const code = 'code' in cause && typeof cause.code === 'string' && /^(OAUTH|ERR)_[A-Z_]+$/.test(cause.code) ? cause.code : 'UNCLASSIFIED';
+          console.error(`[auth] cause=${category} code=${code}; details redacted.`);
+          const oauthError = 'error' in cause ? cause.error : undefined;
+          if (typeof oauthError === 'string' && ['invalid_client','invalid_grant','redirect_uri_mismatch','unauthorized_client','access_denied'].includes(oauthError)) console.error(`[auth] oauth=${oauthError}; details redacted.`);
+        }
+      },
       warn() { console.warn('[auth] Authentication warning; details redacted.'); },
       debug() {},
     },

@@ -8,13 +8,17 @@ export const dynamic = 'force-dynamic';
 async function handle(request: NextRequest) {
   const {settings} = inspectAuthSettings(process.env);
   if (!settings) return Response.json({error:'AUTH_NOT_CONFIGURED'},{status:503,headers:{'Cache-Control':'no-store'}});
-  if (new URL(request.url).host !== new URL(settings.origin).host || (request.method === 'POST' && request.headers.get('origin') !== settings.origin)) {
+  // Next.js can reconstruct request.url using its internal listener hostname.
+  // Validate the actual incoming Host; never trust a forwarded host override.
+  if (request.headers.get('host') !== new URL(settings.origin).host || (request.method === 'POST' && request.headers.get('origin') !== settings.origin)) {
     return Response.json({error:'ORIGIN_NOT_ALLOWED'},{status:403,headers:{'Cache-Control':'no-store'}});
   }
   try {
     const response = await (request.method === 'POST' ? handlers.POST(request) : handlers.GET(request));
-    response.headers.set('Cache-Control','private, no-store');
-    return response;
+    // OAuth redirect responses can have immutable headers; preserve cookies while cloning.
+    const headers = new Headers(response.headers);
+    headers.set('Cache-Control','private, no-store');
+    return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
   } catch {
     return Response.json({error:'AUTH_UNAVAILABLE'},{status:503,headers:{'Cache-Control':'no-store'}});
   }

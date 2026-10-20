@@ -26,7 +26,7 @@ export function mongoClient(settings: AuthSettings) {
   if (globalDb.videoCraftAuthDb?.key !== key) {
     const previous = globalDb.videoCraftAuthDb;
     if (previous) void previous.client.close().catch(() => {});
-    globalDb.videoCraftAuthDb = {key, client:new MongoClient(settings.mongoUri, {serverSelectionTimeoutMS:5000, connectTimeoutMS:5000, maxPoolSize:5, appName:'VideoCraft-web'})};
+    globalDb.videoCraftAuthDb = {key, client:new MongoClient(settings.mongoUri, {promoteLongs:false, serverSelectionTimeoutMS:5000, connectTimeoutMS:5000, maxPoolSize:5, appName:'VideoCraft-web'})};
   }
   return globalDb.videoCraftAuthDb;
 }
