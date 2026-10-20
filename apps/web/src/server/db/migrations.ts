@@ -1,6 +1,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {Long, type Db, type Document, type IndexDescription} from 'mongodb';
 import {authIndexes, migrationCollection, ownedCollections, type CollectionContract} from './schemas';
+import {projectCollections} from './project-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -13,6 +14,14 @@ export const foundationMigration = {
 export const foundationChecksum = createHash('sha256').update(JSON.stringify({
   ...foundationMigration, migrationCollection,
 })).digest('hex');
+
+export const projectMigration = {id: '002_project_library', description: 'Draft voice selection, command replay and project activity', contracts: projectCollections};
+export const projectChecksum = createHash('sha256').update(JSON.stringify(projectMigration)).digest('hex');
+const migrations = [
+  {definition: foundationMigration, checksum: foundationChecksum},
+  {definition: projectMigration, checksum: projectChecksum},
+];
+const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 
 type Migration = {
   _id: string; checksum: string; description: string; state: 'prepared' | 'running' | 'applied' | 'failed';
@@ -94,18 +103,20 @@ export async function verifyTransactionTopology(db: Db) {
 
 /** Read-only; runtime startup never creates collections, indexes or validators. */
 export async function assertDatabaseReady(db: Db) {
-  const row = await db.collection<Migration>('schema_migrations').findOne({_id: foundationMigration.id});
-  if (!row || row.state !== 'applied') throw new DatabaseSetupError('MIGRATION_REQUIRED');
-  if (row.checksum !== foundationChecksum) throw new DatabaseSetupError('MIGRATION_CHECKSUM_MISMATCH');
+  for (const migration of migrations) {
+    const row = await db.collection<Migration>('schema_migrations').findOne({_id: migration.definition.id});
+    if (!row || row.state !== 'applied') throw new DatabaseSetupError('MIGRATION_REQUIRED');
+    if (row.checksum !== migration.checksum) throw new DatabaseSetupError('MIGRATION_CHECKSUM_MISMATCH');
+  }
   await verifyTransactionTopology(db);
   await verifyContract(db, migrationCollection);
-  for (const contract of foundationMigration.contracts) await verifyContract(db, contract);
+  for (const contract of currentContracts) await verifyContract(db, contract);
 }
 
 /** Operator tooling only: audits document shapes without logging rows or values. */
 export async function checkDatabase(db: Db) {
   await assertDatabaseReady(db);
-  for (const contract of [migrationCollection, ...foundationMigration.contracts]) await auditRows(db, contract);
+  for (const contract of [migrationCollection, ...currentContracts]) await auditRows(db, contract);
 }
 
 /** Non-destructive, explicit migration. Run with application/worker writes stopped.
@@ -119,10 +130,38 @@ export async function migrateDatabase(db: Db, options: {retryFailed?: boolean} =
   await auditRows(db, migrationCollection);
   for (const index of migrationCollection.indexes) await db.collection(migrationCollection.name).createIndex(index.key, index);
   await verifyContract(db, migrationCollection);
+  let changed = false;
+  const baseline = new Map<string, CollectionContract>();
+  for (const migration of migrations) {
+    const previous = await db.collection<Migration>('schema_migrations').findOne({_id: migration.definition.id});
+    if (previous?.state !== 'applied') {
+      // Refuse baseline drift before a new migration can overwrite its evidence.
+      for (const contract of baseline.values()) {
+        let expected = contract;
+        try {await verifyContract(db, expected);}
+        catch (error) {
+          const pending = migration.definition.contracts.find(candidate => candidate.name === contract.name);
+          if (!(previous?.state === 'failed' && options.retryFailed && pending && error instanceof DatabaseSetupError && error.code.startsWith('VALIDATOR_DRIFT:'))) throw error;
+          // DDL may have committed this migration's new validator before failure.
+          // Accept that exact validator on explicit retry, preserving baseline indexes.
+          expected = {...contract, validator: pending.validator};
+          await verifyContract(db, expected);
+        }
+        await auditRows(db, expected);
+      }
+    }
+    if (await applyMigration(db, migration.definition, migration.checksum, options)) changed = true;
+    for (const contract of migration.definition.contracts) baseline.set(contract.name, contract);
+  }
+  await checkDatabase(db);
+  return changed ? 'applied' as const : 'already_applied' as const;
+}
+
+async function applyMigration(db: Db, migration: {id: string; description: string; contracts: CollectionContract[]}, checksum: string, options: {retryFailed?: boolean}) {
   const history = db.collection<Migration>('schema_migrations');
-  const previous = await history.findOne({_id: foundationMigration.id});
-  if (previous && previous.checksum !== foundationChecksum) throw new DatabaseSetupError('MIGRATION_CHECKSUM_MISMATCH');
-  if (previous?.state === 'applied') { await checkDatabase(db); return 'already_applied' as const; }
+  const previous = await history.findOne({_id: migration.id});
+  if (previous && previous.checksum !== checksum) throw new DatabaseSetupError('MIGRATION_CHECKSUM_MISMATCH');
+  if (previous?.state === 'applied') return false;
   if (previous?.state === 'running') throw new DatabaseSetupError('MIGRATION_OWNED');
   if (previous && !(previous.state === 'failed' && options.retryFailed)) throw new DatabaseSetupError('MIGRATION_REQUIRES_EXPLICIT_RETRY');
 
@@ -133,8 +172,8 @@ export async function migrateDatabase(db: Db, options: {retryFailed?: boolean} =
       const claim = await history.updateOne({_id: previous._id, state: 'failed', owner: previous.owner, leaseEpoch: previous.leaseEpoch}, {$set: {state: 'running', owner, leaseEpoch: epoch, startedAt: new Date(), finishedAt: null, safeError: null}}, {writeConcern: {w: 'majority'}});
       if (claim.modifiedCount !== 1) throw new DatabaseSetupError('MIGRATION_OWNED');
     } else {
-      await history.insertOne({_id: foundationMigration.id, checksum: foundationChecksum,
-        description: foundationMigration.description, state: 'running', lockName: 'schema', owner,
+      await history.insertOne({_id: migration.id, checksum,
+        description: migration.description, state: 'running', lockName: 'schema', owner,
         leaseEpoch: epoch, startedAt: new Date(), finishedAt: null, safeError: null}, {writeConcern: {w: 'majority'}});
     }
   } catch (error) {
@@ -142,11 +181,11 @@ export async function migrateDatabase(db: Db, options: {retryFailed?: boolean} =
     throw error;
   }
 
-  const ownership = {_id: foundationMigration.id, state: 'running' as const, owner, leaseEpoch: epoch};
+  const ownership = {_id: migration.id, state: 'running' as const, owner, leaseEpoch: epoch};
   try {
     // Audit all existing documents/unique keys before tightening any owned schema.
-    for (const contract of foundationMigration.contracts) await auditRows(db, contract);
-    for (const contract of foundationMigration.contracts) {
+    for (const contract of migration.contracts) await auditRows(db, contract);
+    for (const contract of migration.contracts) {
       if (!await history.findOne(ownership, {projection: {_id: 1}})) throw new DatabaseSetupError('MIGRATION_OWNERSHIP_LOST');
       await createIfMissing(db, contract);
       if (Object.keys(contract.validator).length) await db.command({collMod: contract.name, validator: contract.validator, validationLevel: 'strict', validationAction: 'error', writeConcern: {w: 'majority'}});
@@ -156,7 +195,7 @@ export async function migrateDatabase(db: Db, options: {retryFailed?: boolean} =
     }
     const result = await history.updateOne(ownership, {$set: {state: 'applied', finishedAt: new Date()}}, {writeConcern: {w: 'majority'}});
     if (result.modifiedCount !== 1) throw new DatabaseSetupError('MIGRATION_OWNERSHIP_LOST');
-    return 'applied' as const;
+    return true;
   } catch (error) {
     await history.updateOne(ownership, {$set: {state: 'failed', finishedAt: new Date(), safeError: {
       code: 'MIGRATION_FAILED', message: 'Database migration did not finish. Details are redacted.', retryable: false,

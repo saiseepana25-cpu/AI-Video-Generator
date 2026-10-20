@@ -11,7 +11,7 @@
     "auth:check": "node --env-file-if-exists=.env.local --import tsx scripts/check-auth.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts migrate",
     "db:check": "node --env-file-if-exists=.env.local --import tsx scripts/database.ts check",
-    "db:test": "tsx --test tests/database.integration.ts",
+    "db:test": "tsx --test tests/*.integration.ts",
     "db:test:init": "tsx scripts/init-test-database.ts"
   },
   "dependencies": {

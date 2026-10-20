@@ -1,6 +1,8 @@
 # VideoCraft database foundation
 
-F03 uses the installed MongoDB Node driver (6.21.0), explicit migration tooling and MongoDB replica-set transactions. It adds no paid service or dependency. Authentication remains unchanged for members; project creation is the next milestone.
+F03 uses the installed MongoDB Node driver (6.21.0), explicit migration tooling and MongoDB replica-set transactions. It adds no paid service or dependency. F04 project creation uses this foundation; its acceptance is tracked separately in PROJECT_STATUS.md.
+
+F04 adds migration `002_project_library`: nullable draft voice/accent, strict typed `idempotency_records` and `activity_events`, command replay uniqueness/expiry and activity deduplication/sequence indexes. Migration 001's manifest and checksum stay unchanged. The runner applies ordered versions and checks the latest effective validator for each collection; it verifies the existing baseline before any pending upgrade. Existing application data is audited, not automatically rewritten. Runtime readiness now requires both versions.
 
 ## Configure and migrate the development database
 
@@ -21,23 +23,23 @@ Migration `001_database_foundation` audits current data before tightening valida
 - The existing five Auth.js indexes, including session TTL. Adapter-owned users/accounts/sessions retain their pinned library formats; no custom validator is imposed on those documents.
 - A strict `schema_migrations` history with checksum, owner, BSON Long epoch and partial unique lock for one running migration.
 
-The project deletion receipt is null until its later feature migration. Later jobs/media/publishing/idempotency/activity collections are added with their owning features; this migration does not create incomplete future collections or enable those features. Request validation, catalog compatibility, IANA timezones, grapheme/UTF-8 bounds, cross-record relationships and state transitions remain domain-service responsibilities. MongoDB's string ceilings are deliberately larger than the API's Telugu-aware grapheme limits.
+The project deletion receipt is null until its later feature migration. Later jobs/media/publishing collections are added with their owning features. The project feature adds its bounded command/activity schemas in migration 002, without claiming a working activity drawer. Request validation, catalog compatibility, IANA timezones, grapheme/UTF-8 bounds, cross-record relationships and state transitions remain domain-service responsibilities. MongoDB's string ceilings are deliberately larger than the API's Telugu-aware grapheme limits.
 
-Repeat `web:db:migrate` safely: an applied matching migration runs read-only checks and returns `already applied`. `web:db:check` checks replica-set topology, checksum/history, validators, index definitions and existing row/unique-key validity. It prints no rows, emails, tokens, URI or raw database errors. Authentication startup checks the applied migration/metadata once per process/connection; requests no longer create indexes or change schemas.
+Repeat `web:db:migrate` safely: applied matching migrations verify current contracts and return `already applied` without changing schemas. The operator runner may ensure the stable migration-lock index before checking history. `web:db:check` is read-only and checks replica-set topology, checksum/history, validators, index definitions and existing row/unique-key validity. It prints no rows, emails, tokens, URI or raw database errors. Authentication startup checks the applied migration/metadata once per process/connection; requests no longer create indexes or change schemas.
 
 ## Failure and recovery
 
 - `MIGRATION_REQUIRED`: run the migration before starting the app.
 - `TRANSACTIONS_REQUIRE_REPLICA_SET`: use the configured Atlas replica set or initialize the separate local test replica set below; standalone MongoDB does not satisfy this contract.
 - `INVALID_EXISTING_ROWS` / `DUPLICATE_EXISTING_KEYS`: migration stops rather than deleting or guessing a repair. Inspect the named collection privately, identify the provenance and repair deliberately. No rows or duplicate values are printed.
-- `MIGRATION_REQUIRES_EXPLICIT_RETRY`: after fixing the underlying failure, rerun `npm.cmd run web:db:migrate -- --retry-failed`. Retry keeps the original checksum and increases the ownership epoch. Already-created collections/indexes are safe to revisit; DDL is not one atomic transaction.
+- `MIGRATION_REQUIRES_EXPLICIT_RETRY`: after fixing the underlying failure, rerun `npm.cmd run web:db:migrate -- --retry-failed`. Retry keeps the original checksum and increases the ownership epoch. Already-created collections/indexes are safe to revisit; DDL is not one atomic transaction. If this failed upgrade already installed its exact new validator, explicit retry accepts that validator while still requiring the baseline indexes; unrelated validator/index drift is rejected. New rows valid under that partially installed validator are preserved.
 - `MIGRATION_OWNED`: another runner is active, or a crashed process left a running record. Do not auto-expire or steal the lock. Confirm the original process is stopped, inspect its exact owner/epoch/history privately, then perform a controlled, owner-and-epoch-guarded administrative repair to mark it failed before an explicit retry. No automated force-unlock command is provided.
 - `MIGRATION_CHECKSUM_MISMATCH`, `INDEX_DRIFT` or `VALIDATOR_DRIFT`: stop and investigate. An applied migration is never silently rewritten, and indexes are never dropped to hide a mismatch. Keep migration 001's manifest/schema definition immutable; introduce a new version for future contract changes.
 - Generic `DATABASE_OPERATION_FAILED`: check credentials, TLS, Atlas IP access, connection limits and DDL privileges without sharing secrets. Schema/index administration should use an appropriately scoped operator identity; the runtime only checks readiness and performs application operations.
 
 ## Real local integration tests
 
-Unit tests remain `npm.cmd run web:test`. Real database tests are explicit and **never load `.env.local` or use the application `MONGODB_URI`**. They create randomly named `videocraft_f03_test_<32 hex characters>` databases on the loopback replica set and drop only those exact databases in cleanup. Interrupted test runs may leave disposable databases with that prefix; inspect before manual cleanup.
+Unit tests remain `npm.cmd run web:test`. Real database tests are explicit and **never load `.env.local` or use the application `MONGODB_URI`**. They create randomly named `videocraft_f03_test_<32 hex characters>` and `videocraft_f04_test_<32 hex characters>` databases on the loopback replica set and drop only those exact databases in cleanup. Interrupted test runs may leave disposable databases with those prefixes; inspect before manual cleanup.
 
 This workspace already has MongoDB Community Server 8.0 installed. In a separate terminal from the repository root:
 

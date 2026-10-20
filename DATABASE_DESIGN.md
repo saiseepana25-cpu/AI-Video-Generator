@@ -198,6 +198,8 @@ Fonts/themes are curated catalog IDs. Logo must be a validated available asset w
 | `cleanupJobId`, `deletionReceipt` | Id or null, bounded coarse status; no source text in receipt |
 | `sourceProjectId` | Id or null, duplication provenance only |
 
+F04 draft refinement: `settings.accentId` and `settings.voiceCatalogId` can be null until explicit compatible catalog selection. Migration 002 broadens those two storage fields without rewriting any existing project. This permits persistence only; unresolved settings cannot be approved for generation.
+
 No single `project.status` overwrites planning/rendering/publishing state. DraftState is derived using current brief/proposal/approval; latest run and active publishing intents are separate. A new request/settings change marks old proposals ineligible by source revision/current pointer, without updating the immutable plan.
 
 Internal counter allocation/guards do not advance editor revision. Proposal selection/saved edits advance revision; generation-relevant brief/settings changes also advance briefRevision. Actor history records system versus human changes accurately. When a new plan result is current, CAS uses both active planning request ID and source brief revision.
@@ -351,6 +353,8 @@ Fields: `_id`, workspaceId, userId, routeScope (method + resource/action), keyHa
 Domain change/result record insertion is one transaction; duplicate-key contention reads the committed winner. Same key with changed payload is a conflict. A lost DB commit acknowledgement is resolved by reading this identity/domain unique key before repeating a side effect. Expired records are ignored logically even if TTL has not deleted them.
 
 Store enough safe response data to replay the original project command rather than pretending a later mutable row is its historical result. Never store signed URLs/provider secrets as generic response snapshots. Media signing reauthorizes and remints; upload replay uses the same original reservation and expiry; OAuth replay uses the same encrypted-state transaction. Permanent intent creationCommandId survives this collection's 24-hour default expiry.
+
+F04 concrete fields: project-create receipts use `safeResultRef:{kind:"project",id}` and bounded `safeResponseSnapshot:ProjectDetail`. Migration 002 currently limits this collection to the implemented project-create command and limits activity to `project_created` events with `resourceRefs:{projectId}`. Extend the typed unions in new migrations when other commands/events are implemented; do not edit migration 001/002 manifests after application.
 
 ## 7. Assets, uploads, and pins
 

@@ -90,6 +90,8 @@ All 30 current artifacts were checked for a saved HTML source and screenshot. Re
 
 ## Before coding: reconciliation checklist
 
+F04 implementation reconciliation: UI-03/04 now show real persisted draft cards, title search, cursor loading, and first-project/no-result states. The idea composer saves a draft with language/target; its action is labelled **Create project** until AI planning exists. UI-05 initially shows saved idea/options in the same project route, with editing/planning unavailable. No illustrative video posters, generation states, counters or fictional voices are treated as real data. Voice/accent remain null until explicit catalog selection. Future filter/management/AI controls are enabled only with their owning services. See PROJECT_STATUS.md for actual browser/DB checks.
+
 - Bind each action to its API contract above and the server's allowed actions. Simple prototype button behavior is not authority to generate, publish, reconnect, retry or delete.
 - Personal preference writes accept only language, voice and timezone overrides. No notification digest, email/push preference, density setting or role-management feature is added by the UI.
 - Use the live compatible voice catalog and usage policy; Alice is evaluation-only with source accent. Any fictional catalog/account labels or apparent connectivity in older boards are sample data, not supported production inventory.

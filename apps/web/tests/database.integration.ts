@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
-import {assertDatabaseReady, checkDatabase, foundationChecksum, foundationMigration, migrateDatabase} from '../src/server/db/migrations';
+import {assertDatabaseReady, checkDatabase, foundationChecksum, foundationMigration, projectMigration, migrateDatabase} from '../src/server/db/migrations';
 import {databaseTransaction} from '../src/server/db/transactions';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, type Row} from './fixtures/database';
 
@@ -184,5 +184,19 @@ describe('database foundation on a real local replica set', {concurrency: false}
     await migrateDatabase(validatorDrift);
     await validatorDrift.command({collMod: 'projects', validationAction: 'warn'});
     await assert.rejects(checkDatabase(validatorDrift), /VALIDATOR_DRIFT:projects/);
+  });
+
+  test('explicit failed-upgrade retry accepts its exact partially applied validator without rejecting valid new rows', async () => {
+    const partial = isolatedDb();
+    await migrateDatabase(partial);
+    // Simulate failure after project validator DDL but before receipt collection DDL.
+    await partial.collection<Row>('schema_migrations').updateOne({_id: projectMigration.id}, {$set: {state: 'failed'}});
+    await partial.collection('idempotency_records').drop();
+    const project = projectFixture(); project.settings.voiceCatalogId = null; project.settings.accentId = null;
+    await partial.collection<Row>('projects').insertOne(project);
+    assert.equal(await migrateDatabase(partial, {retryFailed: true}), 'applied');
+    await checkDatabase(partial);
+    assert.equal(await partial.collection('projects').countDocuments(), 1);
+    assert.equal((await partial.collection<Row>('schema_migrations').findOne({_id: projectMigration.id}))?.leaseEpoch.toString(), '2');
   });
 });

@@ -2,7 +2,7 @@
 
 Development progress, feature scope, verification and next steps live in **[PROJECT_STATUS.md](PROJECT_STATUS.md)**. Update that file alongside each feature change.
 
-## Dashboard application — authentication and database foundation
+## Dashboard application — shared project library
 
 The new Next.js application lives in `apps/web`, separate from the existing video prototype. From the repository root:
 
@@ -12,7 +12,9 @@ npm run web:db:migrate
 npm run web:dev
 ```
 
-Open **http://127.0.0.1:3000/sign-in**. The Midnight Frame sign-in flow and server authorization protect Projects / Calendar / Settings. Follow **[AUTH_SETUP.md](AUTH_SETUP.md)** to configure the separate web environment file, Google OAuth client, exact team email allowlist and MongoDB database before migrating/starting. Follow **[DATABASE_SETUP.md](DATABASE_SETUP.md)** for explicit migrations, checks and local transaction tests. The primary Google/MongoDB login flow is live-verified; see PROJECT_STATUS.md for evidence and deferred checks. Project APIs/UI and dashboard generation remain later features. The root URL temporarily redirects toward Projects until the product homepage feature is built.
+Open **http://127.0.0.1:3000/sign-in**. The Midnight Frame sign-in flow and server authorization protect Projects / Calendar / Settings. Follow **[AUTH_SETUP.md](AUTH_SETUP.md)** to configure the separate web environment file, Google OAuth client, exact team email allowlist and MongoDB database before migrating/starting. Follow **[DATABASE_SETUP.md](DATABASE_SETUP.md)** for explicit migrations, checks and local transaction tests. Google/MongoDB login and persisted project creation/list/detail are live-verified; see PROJECT_STATUS.md for evidence and limits. The root URL temporarily redirects toward Projects until the product homepage feature is built.
+
+In Projects, enter an idea, choose English/Telugu and a 30/60/90-second target, then select **Create project**. The server saves a shared draft and opens its details. Search is literal title search; longer libraries use **Load more projects** with signed cursors. Details currently show saved content/options; editing/autosave, live voice selection, AI planning and generation are later milestones. Voice/accent remain explicitly unselected on new drafts; no AI request or paid fallback runs on creation. Repeating a failed save with unchanged input on the same page reuses its request key. Unsaved input recovery across a page reload belongs to F05.
 
 ```sh
 npm run web:typecheck

@@ -171,6 +171,8 @@ Writable project settings use the whole following object when replaced:
 
 Settings resolve into immutable `SettingsSnapshot` containing provider/model/voice ID, adapter versions, pronunciation policy, exact brand/font assets/checksums, template/compiler/output versions, derived caption language, and usage policy. Clients select catalog IDs; the server owns resolution and hashing. Production output profile is fixed, not a client-selected arbitrary resolution/codec.
 
+F04 draft refinement: `accentId` and `voiceCatalogId` may each be null in saved draft SettingsInput. Saving an idea must not require an integration that is implemented later or silently substitute a voice. Approved generation input still requires an explicitly selected, resolved compatible voice/accent; null is never eligible for generation. At F04, only null selections are accepted on creation; non-null selections return `503 VOICE_UNAVAILABLE` until the F06 catalog is connected. The UI offers idea/language/target only; voice and accent remain separate future controls.
+
 ## 5. Pagination, filtering, and ordering
 
 ### 5.1 Cursor contract
@@ -199,6 +201,8 @@ Use the actual server-returned cursor unchanged on the next request with the sam
 | Calendar | Required `from`, `to` UTC timestamps, `timezone`; optional comma-separated states; ascending `(scheduledAtUtc,id)` |
 
 Project generation filter means latest run state; publishing filter means an unresolved matching intent, or latest resolved outcome where specified by the response. A project can match both rendering and scheduled. Filter before pagination, not after loading a page. Deleted projects and inaccessible resources never become visible through counts/search.
+
+F04 implementation checkpoint: project lists implement `q`, `limit`, `cursor` and `order=updated_desc`. Generation/publishing/ready filters are not exposed in the UI and return `400 INVALID_QUERY` until their owning services exist. Only persisted draft summaries are returned; no invented generation/publication state or mandatory aggregate counts.
 
 Duplicate query keys, unsupported order/filter enums, negative/fractional limits, arbitrary regexes, or inconsistent cursor filters return 400. Literal title search escapes metacharacters and does not execute user regex code. Calendar includes publish-now activity using the persisted effective dispatch instant.
 
@@ -389,8 +393,8 @@ Required body: `idea`, `settings:SettingsInput`. Optional `displayTitle`, `audie
   "audience": "Beginners",
   "references": [],
   "settings": {
-    "language": "te", "targetSeconds": 30, "accentId": "source-voice",
-    "voiceCatalogId": "alice-evaluation", "brandKitRevisionId": null,
+    "language": "te", "targetSeconds": 30, "accentId": null,
+    "voiceCatalogId": null, "brandKitRevisionId": null,
     "themeId": "clean-educational-v1", "captionStyleId": "readable-default-v1"
   }
 }
@@ -409,7 +413,7 @@ Required body: `idea`, `settings:SettingsInput`. Optional `displayTitle`, `audie
   "createdBy": {"id":"user_example_1","name":"Team member"},
   "updatedBy": {"id":"user_example_1","name":"Team member"},
   "brief": {"idea":"Explain the water cycle to beginners.","audience":"Beginners","references":[]},
-  "settings": {"language":"te","targetSeconds":30,"accentId":"source-voice","voiceCatalogId":"alice-evaluation","brandKitRevisionId":null,"themeId":"clean-educational-v1","captionStyleId":"readable-default-v1"},
+  "settings": {"language":"te","targetSeconds":30,"accentId":null,"voiceCatalogId":null,"brandKitRevisionId":null,"themeId":"clean-educational-v1","captionStyleId":"readable-default-v1"},
   "draftState": "draft",
   "currentPlanVersionId": null,
   "currentPlanInputHash": null,
@@ -422,7 +426,9 @@ Required body: `idea`, `settings:SettingsInput`. Optional `displayTitle`, `audie
 }
 ```
 
-`Location: /api/v1/projects/<id>`. Persist only; do not start planning, synthesis, or publishing implicitly. Invalid/missing voice returns explicit selection guidance; no paid/provider fallback.
+`Location: /api/v1/projects/<id>`. Persist only; do not start planning, synthesis, or publishing implicitly. Drafts may explicitly leave voice/accent null; attempting to resolve or use an unavailable voice returns selection guidance, with no paid/provider fallback.
+
+F04 implementation checkpoint: API-04/05/06 are connected to MongoDB. Creation uses a UUID Idempotency-Key and exact configured Origin/Host. Project insert, original response snapshot/replay receipt, activity event and workspace sequence increment commit in one transaction. Replay returns the original 201 snapshot plus `Idempotency-Replayed:true`, while deleted/inaccessible source content is never replayed. Responses currently expose `allowedActions:[]` with blocked reasons for editing/planning/generation; later features enable their own actions. Actor summaries contain IDs/names, never team emails. The current request example uses unresolved draft selections; catalog-selected settings become available with F06.
 
 ### API-06 — `GET /api/v1/projects/{projectId}`
 
