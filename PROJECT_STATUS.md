@@ -27,9 +27,11 @@ Repository: [saiseepana25-cpu/AI-Video-Generator](https://github.com/saiseepana2
 
 | Checkpoint | Scope | Publication status |
 |---|---|---|
-| Initial baseline + F01 | Existing video prototype, approved requirements/contracts/design references, Next.js scaffold, status ledger and milestone push instructions | Preparing initial public commit; push/remote verification pending |
+| Initial baseline + F01 | Existing video prototype, approved requirements/contracts/design references, Next.js scaffold, status ledger and milestone push instructions | Published to `origin/dev` on 20 October 2026: [`05b4395`](https://github.com/saiseepana25-cpu/AI-Video-Generator/commit/05b4395879a1e235ac58feb9520ba06c4e1bef1a). Push succeeded and remote `refs/heads/dev` matched the full local commit hash |
 
 The initial commit establishes the previously uncommitted project baseline. Its commit hash is recorded by Git rather than embedded in its own content. Future checkpoint rows identify the feature and verification; final handoffs report the actual pushed commit. A successful push and read-back of the remote ref are required to call a checkpoint published.
+
+Public-source preparation: reviewed all 57 initial staged files (about 817 KB), checked for credential patterns and exact matches against configured local secrets without printing their values, and found no matches. `.env.local`, other configured environment variants, caches, dependencies, generated media and Next.js build output are excluded. Only the key-free `.env.example` is included. Staged whitespace checks passed. This checkpoint adds repository/workflow documentation and ignore rules; application behavior and the F01 verification results below are unchanged. `dev` now tracks `origin/dev`; future milestone commits continue there.
 
 ## Feature roadmap
 
@@ -121,3 +123,4 @@ The approved UI is being implemented against the existing contracts. No API oper
 |---|---|---|
 | 20 October 2026 | Planning / F01 | User approved incremental feature delivery and this status ledger. Recorded the prior prototype separately from the new application; began scaffold |
 | 20 October 2026 | F01 complete | Added separate Next.js shell and local fonts, reusable UI, responsive routes and honest unavailable states; recorded design approval/reconciliation, fixed narrow navigation overflow, passed build/typechecks/15 regression tests and local browser/HTTP checks. Next: F02 |
+| 20 October 2026 | GitHub baseline | Created the user-requested `dev` branch, connected the empty public repository, committed/pushed baseline `05b4395` and verified its remote hash. Recorded the authorized commit/push rule in AGENTS.md and this ledger; environment variants remain ignored |
