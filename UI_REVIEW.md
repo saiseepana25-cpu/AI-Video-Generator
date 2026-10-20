@@ -1,5 +1,7 @@
 # VideoCraft — UI review
 
+F06 reconciliation: saved-project voice/accent controls now use API-03's real compatible catalog. No automatic voice/accent substitution; language changes clear both selections. Alice is explicitly evaluation delivery, with native Indian-English/Telugu options disabled. Unavailable preferred voices, missing/exhausted/unverified access and recoverable catalog/session failures are shown truthfully. Refresh checks availability without synthesizing audio. Free evaluation output does not grant publication rights. The rest of the approved idea workspace and later-feature planning/generation gates remain unchanged.
+
 F05 implementation reconciliation: UI-05's idea workspace and UI-22's save/conflict states now map to editable brief/audience/references and language/duration, a visible serialized autosave state, scoped tab recovery, copy/retry, and side-by-side conflict comparison. Keeping local changes pauses autosave until explicit confirmation. Voice/accent are separate disabled controls until F06. The original project title is retained until F14 rename. Generation/planning controls remain unavailable; no illustrative provider or render state is presented as working.
 
 Status: design set approved by the user, 20 October 2026. Midnight Frame / C is the selected brand. These are approved Stitch designs, not evidence of implemented routes or verified integrations. Implementation progress is tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md).

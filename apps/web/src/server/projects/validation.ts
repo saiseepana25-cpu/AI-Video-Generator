@@ -22,8 +22,10 @@ function text(value: unknown, path: string, max: number, fallback?: string): str
 }
 function unresolved(value: unknown, path: string) {
   if (value === undefined) fail(path, 'Include this field as null until selection is available.');
-  if (value !== null) throw new ProjectError('VOICE_UNAVAILABLE', 503, 'Voice selection is not connected yet. Save a draft with voice and accent unselected.', [{path, code: 'VOICE_UNAVAILABLE', message: 'Use null until the compatible voice catalog is available.'}]);
-  return null;
+  if (value === null) return null;
+  const allowed = path.endsWith('/accentId') ? ['source-voice', 'en-IN', 'te-IN'] : ['alice-evaluation', 'madhavi', 'bharadwaj'];
+  if (typeof value !== 'string' || !allowed.includes(value)) throw new ProjectError('VOICE_UNAVAILABLE', 503, 'Choose a compatible available catalog voice and accent.', [{path, code: 'VOICE_UNAVAILABLE', message: 'Use a supported catalog selection or null.'}]);
+  return value;
 }
 
 export function parseProjectInput(value: unknown): ProjectInput {

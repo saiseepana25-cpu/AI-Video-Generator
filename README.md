@@ -1,5 +1,7 @@
 # VideoCraft
 
+F06 introduces the authenticated `/api/v1/voices` catalog, separate evaluation voice/accent choices and conservative free-provider checks. Put provider settings in ignored `apps/web/.env.local` (see its key-free example), then explicitly migrate the database. Catalog reads never generate audio; the separate operator `web:providers:probe -- en|te` command performs a fixed short free-only compatibility test. Native accent quality and publication rights are not inferred from model language support. Current evidence and limitations remain in Project Status.
+
 The Next.js dashboard now supports editing saved briefs and video options with autosave and conflict recovery (F05). Run the explicit database migration/check with app writes stopped before starting the upgraded dashboard. Local unsaved work can be restored in the same browser tab; closing the tab or clearing browser storage can remove it. Voice selection and AI planning are subsequent milestones. See [Project Status](PROJECT_STATUS.md) for measured verification and the remaining feature roadmap.
 
 Development progress, feature scope, verification and next steps live in **[PROJECT_STATUS.md](PROJECT_STATUS.md)**. Update that file alongside each feature change.

@@ -325,6 +325,10 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 .conflict-columns > div { min-width: 0; border: 1px solid #343946; border-radius: 8px; padding: 12px; }
 .conflict-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .copy-draft { max-width: 100%; }
+.voice-controls { margin-top: 20px; padding-top: 4px; border-top: 1px solid #343946; }
+.catalog-status { font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.catalog-status p { margin: 8px 0; }
+.catalog-status .button { margin: 12px 0; }
 @media (max-width: 760px) { .conflict-columns { grid-template-columns: 1fr; } .editor-options > label { min-width: 0; flex-basis: 100%; } }
 @media (max-width: 380px) {
   .studio-nav { gap: 4px; }

@@ -1,6 +1,8 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {Long, ObjectId, type ClientSession, type Db, type Document, type MongoClient} from 'mongodb';
 import {databaseTransaction} from '../db/transactions';
+import {assertVoiceSelection} from '../providers/catalog';
+import type {Env} from '../providers/contracts';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
 import {ProjectError, requireProjectId, type ProjectContext, type ProjectDetail, type ProjectInput, type ProjectPage, type ProjectSummary} from './contracts';
 import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
@@ -23,7 +25,7 @@ const safeName = (value: unknown) => typeof value === 'string' && value.trim() ?
 export class ProjectService {
   private readonly db: Db;
   constructor(private readonly client: MongoClient, private readonly databaseName: string,
-    private readonly context: ProjectContext, private readonly cursorSecret: string) {
+    private readonly context: ProjectContext, private readonly cursorSecret: string, private readonly providerEnv: Env = {}) {
     this.db = client.db(databaseName);
     if (!/^[a-f0-9]{24}$/.test(context.userId) || !context.workspaceId || cursorSecret.length < 32) throw new Error('Invalid service context');
   }
@@ -115,6 +117,7 @@ export class ProjectService {
         await this.authorize(db, session);
         const existing = await replay(db, session);
         if (existing) return existing;
+        await assertVoiceSelection(db, input.settings, this.providerEnv, session);
         // TTL is asynchronous. Expired receipts cannot block a new logical action.
         await db.collection('idempotency_records').deleteOne({...identity, expiresAt: {$lte: now}}, {session});
         const workspace = await db.collection<Row>('workspaces').findOneAndUpdate({_id: this.context.workspaceId}, {$inc: {nextActivitySequence: Long.ONE}}, {session, returnDocument: 'after'});
@@ -168,6 +171,7 @@ export class ProjectService {
         const changed = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
         let saved = row;
         if (changed) {
+          if (JSON.stringify(settings) !== JSON.stringify(row.settings)) await assertVoiceSelection(db, settings, this.providerEnv, session);
           if (['currentPlanVersionId', 'latestRunId', 'latestReadyVideoId', 'activePlanningJobId', 'planningRequestId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing planned or generated projects is not available yet.');
           if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
           const updated = await db.collection<ProjectRecord>('projects').findOneAndUpdate({...filter, revision: Long.fromNumber(input.expectedProjectRevision)}, {

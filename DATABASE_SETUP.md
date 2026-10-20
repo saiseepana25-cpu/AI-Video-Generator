@@ -1,5 +1,7 @@
 # VideoCraft database foundation
 
+F06 adds `004_provider_catalog`: stop application writes, run migration/check, then restart. It creates only the strict provider observation/test/reservation collection; no keys, enabled voices or allowance claims are seeded. `npm.cmd run web:providers:check` performs metadata reads. `npm.cmd run web:providers:probe -- en` (or `te`) explicitly attempts one fixed short speech test only after a fresh free-account/model/allowance check and atomic conservative reservation. Repeating a successful language probe does not synthesize again. Unknown usage pauses future probes; inspect privately rather than deleting reservation evidence or retrying blindly. Ignored PCM evidence is saved under `.cache/provider-tests/`; it is not an exposed media asset.
+
 F05 adds explicit migration `003_project_editing` for edit receipts/events. With application/worker writes stopped, run `npm.cmd run web:db:migrate`, then `npm.cmd run web:db:check`, and restart the application. Existing 001/002 checksums remain unchanged. No new credentials, provider calls or indexes are required. Never run migration commands simultaneously with app writes. Current implementation evidence is recorded in Project Status.
 
 F03 uses the installed MongoDB Node driver (6.21.0), explicit migration tooling and MongoDB replica-set transactions. It adds no paid service or dependency. F04 project creation uses this foundation; its acceptance is tracked separately in PROJECT_STATUS.md.

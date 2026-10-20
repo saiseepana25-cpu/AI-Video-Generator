@@ -3,6 +3,7 @@ import {Long, type Db, type Document, type IndexDescription} from 'mongodb';
 import {authIndexes, migrationCollection, ownedCollections, type CollectionContract} from './schemas';
 import {projectCollections} from './project-schemas';
 import {editCollections} from './edit-schemas';
+import {providerCollections} from './provider-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -24,6 +25,7 @@ const migrations = [
   {definition: foundationMigration, checksum: foundationChecksum},
   {definition: projectMigration, checksum: projectChecksum},
   {definition: editMigration, checksum: editChecksum},
+  {definition: {id: '004_provider_catalog', description: 'Provider observations, voice tests and conservative free reservations', contracts: providerCollections}, checksum: createHash('sha256').update(JSON.stringify(providerCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

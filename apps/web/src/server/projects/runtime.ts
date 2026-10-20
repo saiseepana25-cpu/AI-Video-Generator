@@ -10,7 +10,7 @@ export function projectServiceForContext(context: Awaited<ReturnType<typeof work
   if (!settings) throw new AccessError('CONNECTION_UNAVAILABLE');
   return new ProjectService(mongoClient(settings).client, settings.databaseName, {
     workspaceId: context.workspace._id, userId: context.identity.userId, userName: context.identity.name,
-  }, settings.secret);
+  }, settings.secret, process.env);
 }
 export async function authenticatedProjects() {
   const context = await workspaceContext();
