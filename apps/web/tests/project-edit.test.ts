@@ -37,3 +37,40 @@ test('conflict envelope returns safe current revision and explicit recovery acti
   const response = projectErrorResponse(new ProjectError('STALE_REVISION', 409, 'Review changes.', [], false, {currentRevision: 2, updatedAt: '2026-10-20T12:00:00.000Z', updatedBy: {id: null, name: 'Team member'}}));
   const value = await response.json(); assert.equal(response.status, 409); assert.equal(value.error.details.currentRevision, 2); assert.equal(value.error.action, 'reload_and_resolve');
 });
+
+test('unfinished offline edits recover before and after autosave captures a pending command', () => {
+  const scope = recoveryKey('workspace', 'user', base.id);
+  for (const unfinished of ['empty-reference', 'blank-idea', 'blank-audience', 'unfinished-url', 'long-idea', 'incomplete-settings']) {
+    const submitted = editable(base);
+    submitted.brief.idea = 'Keep this useful unsaved explanation';
+    submitted.brief.audience = 'Keep this audience edit too';
+    if (unfinished === 'empty-reference') submitted.brief.references.push({referenceId: 'ref_empty', text: '', suppliedUrl: null});
+    if (unfinished === 'blank-idea') submitted.brief.idea = '';
+    if (unfinished === 'blank-audience') submitted.brief.audience = '';
+    if (unfinished === 'unfinished-url') submitted.brief.references.push({referenceId: 'ref_url', text: 'Source', suppliedUrl: 'https://'});
+    if (unfinished === 'long-idea') submitted.brief.idea = 'x'.repeat(2001);
+    if (unfinished === 'incomplete-settings') submitted.settings.themeId = '';
+    const before: Recovery = {version: 1, scope, base, draft: submitted, pending: null, review: false};
+    assert.deepEqual(readRecovery(JSON.stringify(before), scope, base.id), before, unfinished);
+    const body = {expectedProjectRevision: base.revision, patch: changes(base, submitted)};
+    assert.throws(() => parseProjectPatch(body), `Save must still reject ${unfinished}`);
+    const later = editable(submitted); later.brief.audience += ' — typed during save';
+    const after: Recovery = {...before, draft: later, pending: {key: '20000000-0000-4000-8000-000000000001', body, submitted}};
+    assert.deepEqual(readRecovery(JSON.stringify(after), scope, base.id), after, unfinished);
+  }
+});
+
+test('recovery still rejects malformed pending shapes and commands detached from their submitted input', () => {
+  const scope = recoveryKey('workspace', 'user', base.id), draft = editable(base);
+  draft.brief.references.push({referenceId: 'ref_empty', text: '', suppliedUrl: null});
+  const value: Recovery = {version: 1, scope, base, draft, pending: {key: '20000000-0000-4000-8000-000000000001', body: {expectedProjectRevision: 1, patch: changes(base, draft)}, submitted: draft}, review: false};
+  for (const body of [null, [], {expectedProjectRevision: 1, patch: []}, {...value.pending!.body, extra: true}, {expectedProjectRevision: 1, patch: {brief: base.brief}}]) {
+    assert.equal(readRecovery(JSON.stringify({...value, pending: {...value.pending, body}}), scope, base.id), null);
+  }
+  const malformed = structuredClone(value); (malformed.pending!.submitted.settings as unknown) = null;
+  assert.equal(readRecovery(JSON.stringify(malformed), scope, base.id), null);
+  for (const pending of [false, 0, 'pending', []]) assert.equal(readRecovery(JSON.stringify({...value, pending}), scope, base.id), null);
+  const recovered = readRecovery(JSON.stringify(value), scope, base.id)!;
+  recovered.draft.brief.references[0].text = 'Completed source text';
+  assert.doesNotThrow(() => parseProjectPatch({expectedProjectRevision: recovered.base.revision, patch: changes(recovered.base, recovered.draft)}));
+});
