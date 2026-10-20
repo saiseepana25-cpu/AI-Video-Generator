@@ -8,7 +8,9 @@ This is the source of truth for **development progress**: what exists, what was 
 
 **F02 — Individual Google sign-in and shared workspace access: complete for the revised V1 scope.** Google login, MongoDB-backed user/workspace/session creation, authenticated `/api/v1/me`, persistence across refresh, and sign-out/protected-page denial were exercised successfully on 20 October 2026. The user explicitly deferred second-account sharing and additional live unapproved/disabled/expiry checks beyond V1. Those scenarios remain unverified live; existing access controls and unit coverage remain in place. This scope decision does not claim those checks passed.
 
-Next after F02: **F03 — Application database validators, indexes and transaction foundation**.
+**F03 — Application database validators, indexes and transaction foundation: complete.** The explicit foundation migration was tested on an isolated local replica set, applied to the configured development database, checked, and rerun successfully without schema changes. Strict workspaces/memberships/projects validators, named indexes, migration ownership/checksum checks and bounded transactions are implemented. Sixteen unit tests, twelve real database integration tests, TypeScript checking and the production build passed. The existing signed-in Projects page still opens after restart. Later feature collections receive their own migrations when implemented; no project UI/API is included in F03.
+
+Next: **F04 — Shared projects: create/list/detail, cursor pagination and real empty/search states**. Consult the API create-project settings/catalog requirements before implementation; unresolved voice selection must not silently select a provider or enable generation.
 
 ## Working agreement
 
@@ -40,7 +42,7 @@ Public-source preparation: reviewed all 57 initial staged files (about 817 KB), 
 |---|---|---|---|
 | F01 | Next.js scaffold, Midnight Frame tokens, responsive shell and route placeholders | Complete | Production build and both typechecks passed; desktop/mobile/keyboard/HTTP checks passed; 15 prototype tests passed. Details below |
 | F02 | Google sign-in, operator allowlist, one shared workspace, sign-out | Complete | Primary live flow and 14 unit tests passed; user deferred additional multi-account/denied/disabled/expiry live checks beyond V1; no public signup |
-| F03 | MongoDB connection, schema validation, index/bootstrap tooling and transaction foundation | Planned | Idempotent setup; schema/index checks against a test replica set; no network inside transactions |
+| F03 | MongoDB connection, schema validation, index/bootstrap tooling and transaction foundation | Complete | 12 real local replica-set tests, 16 unit tests, TypeScript/build passed; configured development database migrated, checked and safely rerun; details below |
 | F04 | Shared projects: create/list/detail, cursor pagination and real empty/search states | Planned | Team visibility, bounded validation, idempotency, authorization and cursor tests |
 | F05 | Saved brief: language/duration/voice/accent choices, autosave and conflict recovery | Planned | Same-language narration/subtitles; stale revision rejection; unsaved edit recovery |
 | F06 | Provider capability/usage catalog and free-experiment gates | Planned | Actual compatible voice availability; unavailable provider/usage messages; no key exposure |
@@ -159,6 +161,27 @@ The approved UI is being implemented against the existing contracts. No API oper
 
 **Revised F02 acceptance (user decision, 20 October 2026):** second-account workspace sharing and additional live unapproved/disabled-account denial and expiration checks are deferred beyond V1. These policies have unit coverage, but their full live scenarios remain unverified. Existing authentication and authorization controls remain implemented. F02 is **Complete for the revised V1 scope**; the deferred checks are follow-up work, not a V1 blocker. Next: F03 application validators/index migrations/transaction infrastructure, followed by F04 persisted project create/list/detail. The original pipeline is not yet connected to dashboard generation.
 
+### F03 — database foundation, 20 October 2026
+
+**Implemented:**
+
+- [Shared connection/configuration](apps/web/src/server/db/connection.ts), preserving BSON Long, bounded pools and connection timeouts; dedicated application database required, system database names rejected. Auth.js and future application services share the connection.
+- [Owned validators/index contracts](apps/web/src/server/db/schemas.ts) for workspaces/memberships/projects and migration history; strict unknown-field rejection, BSON Date/Long, UUIDs, bounded objects/arrays and supported enums. Adapter documents retain their pinned Auth.js format; existing auth indexes are preserved. API grapheme/byte, catalog, reference and state-transition checks still belong to later domain commands.
+- [Explicit migration runner/read-only checks](apps/web/src/server/db/migrations.ts): preflight existing row shapes/unique keys, checksummed immutable foundation manifest, partial unique running lock, owner/epoch-guarded status updates, explicit failed retry and no automatic running-lock takeover. Applied checksum/index/validator drift fails rather than silently repairing. No drop/backfill/destructive repair is performed by the migration.
+- [Bounded transaction helper](apps/web/src/server/db/transactions.ts): primary/snapshot/majority, driver retry/operation budget, guaranteed session cleanup. Callbacks must contain serial session-bound MongoDB operations only; external side effects and fresh command IDs belong outside retryable callbacks. Domain idempotency/relationship guards are added with their owning features.
+- [CLI](apps/web/scripts/database.ts), isolated [test replica initializer](apps/web/scripts/init-test-database.ts), root/web npm commands, [DATABASE_SETUP.md](DATABASE_SETUP.md), and updated README/auth setup/design handoff. Runtime authentication now requires the applied migration and checks metadata once per process/connection; no request-time DDL.
+
+| Check | Result / limits |
+|---|---|
+| `npm run web:test` | 16 passed (14 existing auth/policy tests plus database configuration and index-drift unit checks) |
+| `npm run web:db:test` | 12 real tests passed on installed MongoDB Community 8.0, isolated loopback replica set `vcF03`. Verified idempotent migrations/data preservation, read-only missing-migration refusal, strict BSON/unknown-field/language rejection, real unique indexes/TTL metadata, commits/rollbacks, concurrent revision updates, invalid/duplicate pre-existing row refusal, explicit retry, competing/running ownership, checksum/index/validator drift. No mocks substitute for these constraints |
+| Test isolation | Tests do not load local credentials or use application MONGODB_URI. Randomly named disposable test databases were cleaned after completion. Test server was bound to loopback; its files/logs are ignored in `.cache`. The initializer was also run successfully from the committed npm command |
+| Configured development database | `web:db:migrate` applied migration 001; `web:db:check` passed actual checksum, topology, validators, indexes and row/unique-key audit; a second migration run returned already applied. Initial sandbox network failures were resolved with permitted networking, without modifying network allowlists or credentials |
+| `npm run web:typecheck` / `npm run web:build` | Passed after implementation; production build includes the auth routes and protected pages. No new dependency installation or provider generation |
+| Authentication regression | Restarted production server; existing browser session refreshed to real signed-in Projects/shared workspace. Unauthenticated Projects/Calendar/Settings redirected to sign-in; `/api/v1/me` returned private/no-store 401; Google provider discovery returned 200 with canonical callback; sign-in available and checked response bodies did not contain configured secrets. No new Google consent, second-account/disabled/expiry live checks or authenticated API fetch was performed in F03 |
+
+**Limits/next:** this is backend infrastructure; the dashboard appearance and disabled creation controls remain as before. Only the foundational collections are migrated. Jobs, media, activity/idempotency, publishing and other owned schemas are introduced with their features using new migrations; deletionReceipt remains null until deletion is implemented. Runtime metadata readiness is cached for the process, while explicit `db:check` audits current data/drift. F04 is next: persisted project create/list/detail with scoped access, bounded inputs, cursor pagination and command idempotency. No deployment, spending, video rerender or Instagram operation occurred.
+
 ## Change log
 
 | Date | Feature | Change |
@@ -170,3 +193,4 @@ The approved UI is being implemented against the existing contracts. No API oper
 | 20 October 2026 | F02 configuration | Resolved root-versus-web environment file mismatch by copying three Google/team settings into the ignored web environment. Setup check now reports only MongoDB URI missing; live login remains unverified |
 | 20 October 2026 | F02b live check | Verified real Google login, MongoDB-backed session/workspace, authenticated context, refresh persistence and sign-out; corrected host/callback normalization, immutable response headers and BSON Long decoding. Broader multi-account/access scenarios remain pending |
 | 20 October 2026 | V1 scope decision | User deferred additional multi-account/denied/disabled/expiry live authentication checks beyond V1. F02 closed for the revised scope using existing primary live verification and unit coverage; no access controls removed and no new checks claimed. Next milestone is F03 database foundation. Documentation-only change; no application behavior changed |
+| 20 October 2026 | F03 complete | Added explicit schema/index migration, audits/checksum/ownership controls, shared connection and bounded transactions; 16 unit + 12 real local MongoDB tests and build/typecheck passed. Applied/checked/reran the configured development migration; existing signed-in dashboard and unauthenticated HTTP checks passed. Next: F04 persisted projects |

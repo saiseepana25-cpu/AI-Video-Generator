@@ -2,20 +2,22 @@
 
 Development progress, feature scope, verification and next steps live in **[PROJECT_STATUS.md](PROJECT_STATUS.md)**. Update that file alongside each feature change.
 
-## Dashboard application — authentication foundation
+## Dashboard application — authentication and database foundation
 
 The new Next.js application lives in `apps/web`, separate from the existing video prototype. From the repository root:
 
 ```sh
 npm ci --prefix apps/web
+npm run web:db:migrate
 npm run web:dev
 ```
 
-Open **http://127.0.0.1:3000/sign-in**. The Midnight Frame sign-in flow and server authorization now protect Projects / Calendar / Settings. Follow **[AUTH_SETUP.md](AUTH_SETUP.md)** to configure the separate web environment file, Google OAuth client, exact team email allowlist and MongoDB database. Until setup is complete, sign-in remains disabled and private pages redirect to sign-in. This checkpoint is not yet a live-verified Google/MongoDB integration; see PROJECT_STATUS.md. Project storage and generation remain later features. The root URL temporarily redirects toward Projects until the product homepage feature is built.
+Open **http://127.0.0.1:3000/sign-in**. The Midnight Frame sign-in flow and server authorization protect Projects / Calendar / Settings. Follow **[AUTH_SETUP.md](AUTH_SETUP.md)** to configure the separate web environment file, Google OAuth client, exact team email allowlist and MongoDB database before migrating/starting. Follow **[DATABASE_SETUP.md](DATABASE_SETUP.md)** for explicit migrations, checks and local transaction tests. The primary Google/MongoDB login flow is live-verified; see PROJECT_STATUS.md for evidence and deferred checks. Project APIs/UI and dashboard generation remain later features. The root URL temporarily redirects toward Projects until the product homepage feature is built.
 
 ```sh
 npm run web:typecheck
 npm run web:test
+npm run web:db:check
 npm run web:build
 npm run web:start
 ```

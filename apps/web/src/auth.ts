@@ -10,7 +10,7 @@ import {authDatabase, enrollMember, mongoClient, prepareAuthDatabase, type Membe
 export const {handlers, auth, signIn, signOut} = NextAuth(async () => {
   const {settings} = inspectAuthSettings(process.env);
   if (!settings) throw new Error('Authentication configuration unavailable');
-  // Establish uniqueness before the adapter can write users/accounts/sessions.
+  // Require the explicit migration before adapter writes; requests never run DDL.
   await prepareAuthDatabase(settings);
   const adapter = MongoDBAdapter(() => mongoClient(settings).client, {databaseName:settings.databaseName});
   return {

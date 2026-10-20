@@ -61,12 +61,14 @@ From the repository root:
 ```sh
 npm run web:auth:check
 npm run web:auth:check -- --database
+npm run web:db:migrate
+npm run web:db:check
 npm run web:dev
 ```
 
-The check prints only setting names/status, never their values. The optional database check makes a read-only ping; a successful ping does not establish write permissions or OAuth success. Restart the web server after changing environment values, then open [local sign-in](http://127.0.0.1:3000/sign-in).
+The auth check prints only setting names/status, never their values. Its optional database flag makes a read-only ping; a successful ping does not establish write permissions or OAuth success. F03 requires an explicit database migration before sign-in; requests no longer create indexes. Stop application/worker writes while migrating. See [DATABASE_SETUP.md](DATABASE_SETUP.md) for privileges, non-destructive audits, retries and isolated tests. Restart the web server after changing environment values, then open [local sign-in](http://127.0.0.1:3000/sign-in).
 
-Choose **Continue with Google** and complete Google's account/consent screens yourself. An approved account should reach Projects; refreshing should preserve the database session. Use **Sign out**, then verify direct `/projects`, `/calendar`, `/settings` access redirects to sign-in and `/api/v1/me` returns 401. An unapproved account must be denied. Two approved accounts should resolve the same workspace ID, without sharing their session cookies. These live checks must be recorded before F02 is complete.
+Choose **Continue with Google** and complete Google's account/consent screens yourself. An approved account should reach Projects; refreshing should preserve the database session. Use **Sign out**, then verify direct `/projects`, `/calendar`, `/settings` access redirects to sign-in and `/api/v1/me` returns 401. The primary live flow was verified on 20 October 2026. The user explicitly deferred additional second-account/unapproved/disabled/expiry live checks beyond V1; existing access policies and unit coverage remain in place. F02 is complete for that revised scope; PROJECT_STATUS.md records what was actually tested.
 
 If Google's page says `redirect_uri_mismatch`, compare the entire callback URI (scheme, host, port and path). If the sign-in button is disabled, run the local setup check. If MongoDB cannot connect, check the database user's credentials and current IP allowlist. Never post raw connection errors or a connection URI to chat.
 

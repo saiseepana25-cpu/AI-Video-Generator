@@ -829,6 +829,8 @@ Schema versions are collection/document contract versions; plan schema v2 is sep
 
 ### 14.2 Deployment migration order
 
+F03 implementation checkpoint (20 October 2026): explicit migration `001_database_foundation` implements the strict owned validators for workspaces/memberships/projects, compatible Auth.js indexes, the project-library index and checksummed migration history/ownership lock. Runtime authentication only checks migration readiness; it no longer creates indexes. Later feature collections and transitions are introduced by subsequent immutable migrations with their domain services. `projects.deletionReceipt` is restricted to null until the deletion feature defines its bounded receipt. The full schema inventory above remains the target contract, not a claim that all future collections exist. See [DATABASE_SETUP.md](DATABASE_SETUP.md) for commands/recovery and [PROJECT_STATUS.md](PROJECT_STATUS.md) for verification evidence.
+
 1. Verify the account supports chosen transactions, validators/indexes, TLS/network access and connection limits.
 2. Create new collections/base validators and named indexes in a controlled migration process. DDL/index operations are not assumed to share a transaction with application data.
 3. Audit existing rows for missing fields, wrong types, duplicate unique keys, invalid activeSlot and foreign references; repair with documented provenance before tightening validators.

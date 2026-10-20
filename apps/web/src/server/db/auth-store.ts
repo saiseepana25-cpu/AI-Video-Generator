@@ -1,8 +1,11 @@
 import 'server-only';
 import {randomUUID} from 'node:crypto';
-import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
+import {Long, ObjectId} from 'mongodb';
 import type {AuthSettings} from '../configuration/auth';
-import {AccessError, authorizeMembership} from '../auth/access-policy';
+import {authorizeMembership} from '../auth/access-policy';
+import {applicationDatabase, mongoClient} from './connection';
+import {assertDatabaseReady} from './migrations';
+export {mongoClient} from './connection';
 
 export type Membership = {
   _id: string; schemaVersion: 1; workspaceId: string; userId: string; normalizedEmail: string;
@@ -17,41 +20,17 @@ export type Workspace = {
   createdAt: Date; updatedAt: Date; updatedBy: {kind: 'system'; service: string};
 };
 
-type Connection = {key: string; client: MongoClient; indexes?: Promise<void>};
-const globalDb = globalThis as typeof globalThis & {videoCraftAuthDb?: Connection};
-
-export function mongoClient(settings: AuthSettings) {
-  // The key remains server memory only; no URI is logged.
-  const key = `${settings.mongoUri}\n${settings.databaseName}`;
-  if (globalDb.videoCraftAuthDb?.key !== key) {
-    const previous = globalDb.videoCraftAuthDb;
-    if (previous) void previous.client.close().catch(() => {});
-    globalDb.videoCraftAuthDb = {key, client:new MongoClient(settings.mongoUri, {promoteLongs:false, serverSelectionTimeoutMS:5000, connectTimeoutMS:5000, maxPoolSize:5, appName:'VideoCraft-web'})};
-  }
-  return globalDb.videoCraftAuthDb;
-}
-
-export async function authDatabase(settings: AuthSettings): Promise<Db> {
-  const connection = mongoClient(settings);
-  await connection.client.connect();
-  return connection.client.db(settings.databaseName);
-}
+export const authDatabase = applicationDatabase;
 
 export async function prepareAuthDatabase(settings: AuthSettings) {
   const connection = mongoClient(settings);
-  if (!connection.indexes) {
-    connection.indexes = (async () => {
-      const db = await authDatabase(settings);
-      await db.collection('users').createIndex({email:1}, {unique:true, name:'auth_user_email'});
-      await db.collection('accounts').createIndex({provider:1,providerAccountId:1}, {unique:true,name:'auth_provider_subject'});
-      await db.collection('sessions').createIndex({sessionToken:1}, {unique:true,name:'auth_session_token'});
-      await db.collection('sessions').createIndex({userId:1}, {name:'auth_session_user'});
-      await db.collection('sessions').createIndex({expires:1}, {expireAfterSeconds:0,name:'auth_session_expiry'});
-      await db.collection('memberships').createIndex({workspaceId:1,userId:1}, {unique:true,name:'membership_workspace_user'});
-      await db.collection('memberships').createIndex({workspaceId:1,status:1}, {name:'membership_workspace_status'});
-    })().catch(error => { connection.indexes = undefined; throw error; });
+  if (!connection.ready) {
+    connection.ready = authDatabase(settings).then(assertDatabaseReady).catch(error => {
+      connection.ready = undefined;
+      throw error;
+    });
   }
-  await connection.indexes;
+  await connection.ready;
 }
 
 export async function enrollMember(settings: AuthSettings, userId: string, email: string) {

@@ -36,6 +36,7 @@ export function inspectAuthSettings(env: Record<string, string | undefined>) {
   if (!/^mongodb(?:\+srv)?:\/\/[^\s<>]+$/.test(mongoUri) || /[?&](?:tls|ssl)=false(?:&|$)/i.test(mongoUri)) issues.push('MONGODB_URI');
   const databaseName = value('MONGODB_DB');
   if (!/^[a-zA-Z0-9_-]{1,63}$/.test(databaseName)) issues.push('MONGODB_DB');
+  else if (['admin','local','config'].includes(databaseName.toLowerCase())) issues.push('MONGODB_DB');
   const workspaceId = value('WORKSPACE_ID');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(workspaceId)) issues.push('WORKSPACE_ID');
   const workspaceName = value('WORKSPACE_NAME');
