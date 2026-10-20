@@ -68,7 +68,7 @@ async function auditRows(db: Db, contract: CollectionContract) {
   }
 }
 
-async function verifyContract(db: Db, contract: CollectionContract) {
+async function verifyContract(db: Db, contract: CollectionContract, allowMissingIndexes = false) {
   const collection = await info(db, contract.name);
   if (!collection) throw new DatabaseSetupError(`COLLECTION_MISSING:${contract.name}`);
   if (Object.keys(contract.validator).length && (
@@ -78,6 +78,7 @@ async function verifyContract(db: Db, contract: CollectionContract) {
   const indexes = await db.collection(contract.name).listIndexes().toArray();
   for (const expected of contract.indexes) {
     const actual = indexes.find(index => index.name === expected.name);
+    if (!actual && allowMissingIndexes) continue;
     if (!actual || !indexMatches(actual, expected)) throw new DatabaseSetupError(`INDEX_DRIFT:${contract.name}:${expected.name}`);
   }
 }
@@ -125,10 +126,22 @@ export async function checkDatabase(db: Db) {
  */
 export async function migrateDatabase(db: Db, options: {retryFailed?: boolean} = {}) {
   await verifyTransactionTopology(db);
-  // Stable bootstrap contract precedes the migration's ownership record.
-  await createIfMissing(db, migrationCollection);
+  // Only an initial bootstrap may create the lock index. Recorded history turns
+  // missing or changed lock metadata into drift, before any migration writes.
+  if (!await info(db, migrationCollection.name)) await createIfMissing(db, migrationCollection);
+  const history = db.collection<Migration>(migrationCollection.name);
+  const hasHistory = await history.findOne({}, {projection: {_id: 1}});
+  await verifyContract(db, migrationCollection, !hasHistory);
   await auditRows(db, migrationCollection);
-  for (const index of migrationCollection.indexes) await db.collection(migrationCollection.name).createIndex(index.key, index);
+  if (!hasHistory) {
+    const indexes = await history.listIndexes().toArray();
+    for (const index of migrationCollection.indexes) {
+      if (indexes.some(existing => existing.name === index.name)) continue;
+      // A concurrent first runner may have finished bootstrap in the meantime.
+      if (await history.findOne({}, {projection: {_id: 1}})) break;
+      await history.createIndex(index.key, index);
+    }
+  }
   await verifyContract(db, migrationCollection);
   let changed = false;
   const baseline = new Map<string, CollectionContract>();

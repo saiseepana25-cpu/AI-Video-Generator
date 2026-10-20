@@ -14,6 +14,8 @@ This is the source of truth for **development progress**: what exists, what was 
 
 Next: **F05 — Saved brief editing, autosave and conflict recovery**. Allow editing saved idea/options with revision checks and preserve unsaved changes; live compatible voice selection remains gated on F06 catalog verification. Rename/duplicate/delete are F14, not implicit F05 scope.
 
+**Review fix: migration-lock drift — complete.** Recorded migration history now requires the existing exact running-lock index before any bootstrap writes. Missing/changed lock metadata is refused with INDEX_DRIFT; only empty initial setup can create the index. Real command monitoring verified zero DDL/data writes on already-applied reruns and drift failures. All 23 unit tests, 25 real DB tests and TypeScript checks passed. No product feature, manifest/checksum change or configured development schema change is included.
+
 ## Working agreement
 
 - Deliver one small feature at a time. Only the current feature is authorized by this milestone; this list is a sequence, not a claim that everything is implemented.
@@ -213,6 +215,8 @@ Final review also fixed explicit retry after partially applied upgrade DDL: the 
 
 ## Change log
 
+Review verification, 20 October 2026: fixed P2 “Detect migration-lock drift before recreating its index” in `apps/web/src/server/db/migrations.ts`. Three new real-MongoDB regression cases cover a dropped lock (left absent, history unchanged), weakened uniqueness/wrong partial filter (zero writes), and interrupted initial bootstrap with empty valid history. The existing idempotence test now monitors commands and asserts no writes. First-run concurrency, partial-upgrade recovery and project service regressions also passed. Used only isolated loopback test databases; no application DB migration, UI change, new build, provider call or deployment was performed. Setup documentation now states the strict drift-refusal behavior.
+
 | Date | Feature | Change |
 |---|---|---|
 | 20 October 2026 | Planning / F01 | User approved incremental feature delivery and this status ledger. Recorded the prior prototype separately from the new application; began scaffold |
@@ -224,3 +228,4 @@ Final review also fixed explicit retry after partially applied upgrade DDL: the 
 | 20 October 2026 | V1 scope decision | User deferred additional multi-account/denied/disabled/expiry live authentication checks beyond V1. F02 closed for the revised scope using existing primary live verification and unit coverage; no access controls removed and no new checks claimed. Next milestone is F03 database foundation. Documentation-only change; no application behavior changed |
 | 20 October 2026 | F03 complete | Added explicit schema/index migration, audits/checksum/ownership controls, shared connection and bounded transactions; 16 unit + 12 real local MongoDB tests and build/typecheck passed. Applied/checked/reran the configured development migration; existing signed-in dashboard and unauthenticated HTTP checks passed. Next: F04 persisted projects |
 | 20 October 2026 | F04 complete | Connected persisted project create/list/detail and the approved composer/library to MongoDB; added migration 002, typed command replay/activity, validation and signed pagination. Passed 23 unit + 22 DB tests/build/typecheck and live browser/API/mobile checks. Two review drafts remain saved. Next: F05 editing/autosave |
+| 20 October 2026 | F04 review fix | Refuse missing/changed migration-lock indexes before bootstrap writes; create lock only for initial empty history. Passed 23 unit + 25 real DB tests and TypeScript; command monitoring verified zero-write reruns/refusals. Next remains F05 |

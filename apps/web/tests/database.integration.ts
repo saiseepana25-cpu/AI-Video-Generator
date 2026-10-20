@@ -1,16 +1,17 @@
 import {after, before, describe, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
+import {Long, MongoClient, ObjectId, type CommandStartedEvent, type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {assertDatabaseReady, checkDatabase, foundationChecksum, foundationMigration, projectMigration, migrateDatabase} from '../src/server/db/migrations';
 import {databaseTransaction} from '../src/server/db/transactions';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, type Row} from './fixtures/database';
+import {migrationCollection} from '../src/server/db/schemas';
 
 // Intentionally does NOT load .env.local or use MONGODB_URI. Never drop an app DB.
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Database tests require a loopback-only replica set URI with no database path or credentials.');
-const client = new MongoClient(uri, databaseClientOptions);
+const client = new MongoClient(uri, {...databaseClientOptions, monitorCommands: true});
 const databases: string[] = [];
 function isolatedDb(): Db {
   const name = `videocraft_f03_test_${randomUUID().replaceAll('-', '')}`;
@@ -18,6 +19,16 @@ function isolatedDb(): Db {
   return client.db(name);
 }
 const errorCode = (code: number) => (error: unknown) => !!error && typeof error === 'object' && 'code' in error && error.code === code;
+const writeCommands = new Set(['create', 'createIndexes', 'collMod', 'insert', 'update', 'delete', 'findAndModify', 'drop', 'dropIndexes', 'dropDatabase']);
+async function captureWrites(db: Db, work: () => Promise<void>) {
+  const writes: string[] = [];
+  const listener = (event: CommandStartedEvent) => {
+    if (event.databaseName === db.databaseName && writeCommands.has(event.commandName)) writes.push(event.commandName);
+  };
+  client.on('commandStarted', listener);
+  try {await work();} finally {client.off('commandStarted', listener);}
+  return writes;
+}
 
 describe('database foundation on a real local replica set', {concurrency: false}, () => {
   let db: Db;
@@ -37,13 +48,47 @@ describe('database foundation on a real local replica set', {concurrency: false}
   });
 
   test('migration is idempotent, preserves data, stores BSON Long epoch and verifies actual metadata', async () => {
-    assert.equal(await migrateDatabase(db), 'already_applied');
+    const writes = await captureWrites(db, async () => {assert.equal(await migrateDatabase(db), 'already_applied');});
+    assert.deepEqual(writes, [], 'An already-applied migration must issue no DDL or data writes.');
     await checkDatabase(db);
     assert.equal(await db.collection('workspaces').countDocuments(), 1);
     const history = await db.collection<Row>('schema_migrations').findOne({_id: foundationMigration.id});
     assert.equal(history?.checksum, foundationChecksum);
     assert.ok(Long.isLong(history?.leaseEpoch));
     assert.equal(history?.state, 'applied');
+  });
+
+  test('a dropped migration lock is reported as drift without recreating it or changing history', async () => {
+    const drift = isolatedDb();
+    await migrateDatabase(drift);
+    const before = await drift.collection('schema_migrations').find().sort({_id: 1}).toArray();
+    await drift.collection('schema_migrations').dropIndex('one_running_schema_migration_v1');
+    const writes = await captureWrites(drift, async () => {
+      await assert.rejects(migrateDatabase(drift), /INDEX_DRIFT:schema_migrations:one_running_schema_migration_v1/);
+    });
+    assert.deepEqual(writes, []);
+    assert.ok(!(await drift.collection('schema_migrations').listIndexes().toArray()).some(index => index.name === 'one_running_schema_migration_v1'));
+    assert.deepEqual(await drift.collection('schema_migrations').find().sort({_id: 1}).toArray(), before);
+  });
+
+  test('changed migration-lock definitions fail before any bootstrap write', async () => {
+    for (const options of [{unique: false, partialFilterExpression: {state: 'running'}}, {unique: true, partialFilterExpression: {state: 'prepared'}}]) {
+      const drift = isolatedDb();
+      await migrateDatabase(drift);
+      await drift.collection('schema_migrations').dropIndex('one_running_schema_migration_v1');
+      await drift.collection('schema_migrations').createIndex({lockName: 1}, {name: 'one_running_schema_migration_v1', ...options});
+      const writes = await captureWrites(drift, async () => {
+        await assert.rejects(migrateDatabase(drift), /INDEX_DRIFT:schema_migrations:one_running_schema_migration_v1/);
+      });
+      assert.deepEqual(writes, []);
+    }
+  });
+
+  test('initial setup can finish creating the lock for an empty, correctly validated history collection', async () => {
+    const initial = isolatedDb();
+    await initial.createCollection(migrationCollection.name, {validator: migrationCollection.validator, validationLevel: 'strict', validationAction: 'error'});
+    assert.equal(await migrateDatabase(initial), 'applied');
+    await checkDatabase(initial);
   });
 
   test('runtime readiness refuses an unmigrated database without creating collections', async () => {
