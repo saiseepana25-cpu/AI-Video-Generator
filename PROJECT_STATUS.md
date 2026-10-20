@@ -6,7 +6,7 @@ This is the source of truth for **development progress**: what exists, what was 
 
 ## Current focus
 
-**F02 — Individual Google sign-in and shared workspace access: in progress; primary live flow verified.** Google login, MongoDB-backed user/workspace/session creation, authenticated `/api/v1/me`, persistence across refresh, and sign-out/protected-page denial were exercised successfully on 20 October 2026. Remaining acceptance is multi-account sharing and live denied/disabled/expiry scenarios; those policies currently have unit coverage. No new product feature started during the connectivity test.
+**F02 — Individual Google sign-in and shared workspace access: complete for the revised V1 scope.** Google login, MongoDB-backed user/workspace/session creation, authenticated `/api/v1/me`, persistence across refresh, and sign-out/protected-page denial were exercised successfully on 20 October 2026. The user explicitly deferred second-account sharing and additional live unapproved/disabled/expiry checks beyond V1. Those scenarios remain unverified live; existing access controls and unit coverage remain in place. This scope decision does not claim those checks passed.
 
 Next after F02: **F03 — Application database validators, indexes and transaction foundation**.
 
@@ -39,7 +39,7 @@ Public-source preparation: reviewed all 57 initial staged files (about 817 KB), 
 | ID | Small feature | Status | Completion evidence required |
 |---|---|---|---|
 | F01 | Next.js scaffold, Midnight Frame tokens, responsive shell and route placeholders | Complete | Production build and both typechecks passed; desktop/mobile/keyboard/HTTP checks passed; 15 prototype tests passed. Details below |
-| F02 | Google sign-in, operator allowlist, one shared workspace, sign-out | In progress | Allowed/denied users, session expiry, protected routes and API authorization; no public signup |
+| F02 | Google sign-in, operator allowlist, one shared workspace, sign-out | Complete | Primary live flow and 14 unit tests passed; user deferred additional multi-account/denied/disabled/expiry live checks beyond V1; no public signup |
 | F03 | MongoDB connection, schema validation, index/bootstrap tooling and transaction foundation | Planned | Idempotent setup; schema/index checks against a test replica set; no network inside transactions |
 | F04 | Shared projects: create/list/detail, cursor pagination and real empty/search states | Planned | Team visibility, bounded validation, idempotency, authorization and cursor tests |
 | F05 | Saved brief: language/duration/voice/accent choices, autosave and conflict recovery | Planned | Same-language narration/subtitles; stale revision rejection; unsaved edit recovery |
@@ -157,7 +157,7 @@ The approved UI is being implemented against the existing contracts. No API oper
 - Set MongoDB `promoteLongs:false` to preserve BSON Long counters expected by the API. This resolved a real authenticated `/me` failure; final user/workspace context and revision were read successfully.
 - **Checks:** 14 auth tests passed; final production build (including TypeScript) passed. No paid AI generation, deployment, or additional product feature was started. Initial sandbox-only connectivity failure was resolved by rerunning with network permission; the live database connection passed.
 
-**Remaining F02 acceptance:** use a second approved Google account to confirm shared workspace identity, and exercise live unapproved/disabled-account denial and expiration. These policies have unit coverage, but their full live scenarios remain unverified. F02 stays **In progress** until those acceptance checks are closed. Then proceed to F03 application validators/index migrations/transaction infrastructure, followed by F04 persisted project create/list/detail. The original pipeline is not yet connected to dashboard generation.
+**Revised F02 acceptance (user decision, 20 October 2026):** second-account workspace sharing and additional live unapproved/disabled-account denial and expiration checks are deferred beyond V1. These policies have unit coverage, but their full live scenarios remain unverified. Existing authentication and authorization controls remain implemented. F02 is **Complete for the revised V1 scope**; the deferred checks are follow-up work, not a V1 blocker. Next: F03 application validators/index migrations/transaction infrastructure, followed by F04 persisted project create/list/detail. The original pipeline is not yet connected to dashboard generation.
 
 ## Change log
 
@@ -169,3 +169,4 @@ The approved UI is being implemented against the existing contracts. No API oper
 | 20 October 2026 | F02a | Implemented and tested authentication foundation, protected routes/API and beginner setup guide; pushed `80346bd` to `origin/dev` and verified the remote hash. F02 remains in progress pending Google/MongoDB configuration and real session checks; user is reviewing why Google developer setup is needed |
 | 20 October 2026 | F02 configuration | Resolved root-versus-web environment file mismatch by copying three Google/team settings into the ignored web environment. Setup check now reports only MongoDB URI missing; live login remains unverified |
 | 20 October 2026 | F02b live check | Verified real Google login, MongoDB-backed session/workspace, authenticated context, refresh persistence and sign-out; corrected host/callback normalization, immutable response headers and BSON Long decoding. Broader multi-account/access scenarios remain pending |
+| 20 October 2026 | V1 scope decision | User deferred additional multi-account/denied/disabled/expiry live authentication checks beyond V1. F02 closed for the revised scope using existing primary live verification and unit coverage; no access controls removed and no new checks claimed. Next milestone is F03 database foundation. Documentation-only change; no application behavior changed |
