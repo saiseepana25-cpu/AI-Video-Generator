@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>VideoCraft · Local studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="logo">▶</span>VideoCraft<span class="beta">LAB</span></a>
+    <p class="eyebrow workspace-label">TEAM WORKSPACE</p>
+    <button class="nav selected" id="new-project">✦ <span>Create an explainer</span><span>＋</span></button>
+    <a class="nav" href="#library">▤ <span>Video library</span></a>
+    <div class="project-heading"><span class="eyebrow">YOUR PLANS</span><span id="project-count">0</span></div>
+    <div id="projects" class="project-list"></div>
+    <div class="sidebar-bottom"><span class="status-dot"></span>Running on your computer<p>Internal prototype · files saved locally</p></div>
+  </aside>
+  <main>
+    <header><span>Workspace <span class="slash">/</span> Create</span><span class="local-badge">LOCAL PROTOTYPE</span></header>
+    <div class="page">
+      <div class="intro"><div><p class="eyebrow blue">SMALL IDEAS. CLEAR EXPLANATIONS.</p><h1>Your next explainer<br>starts here.</h1><p class="subhead">Plan a story. Bring it to life with motion and voice.</p></div><div class="stepper"><span class="current">1 <b>Plan</b></span><i></i><span>2 <b>Generate</b></span><i></i><span>3 <b>Review</b></span></div></div>
+      <div id="notice" class="notice" role="status">Loading local studio…</div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div class="studio-grid">
+        <section>
+          <form id="idea-form" class="card idea-card">
+            <div class="card-heading"><span class="small-icon">✦</span><h2>What would you like to explain?</h2><span class="tag">EDUCATION</span></div>
+            <label for="mode">Creation mode</label><select id="mode"><option value="offline">Offline samples · no API key needed</option value="gemini">Live Gemini · requires your free-tier key</option></select>
+            <div id="sample-wrap"><label for="topic">Choose a sample lesson</label><div class="two-fields"><select id="topic"><option value="water-cycle">The water cycle</option><option value="seed-growth">How a seed grows</option></select><span class="sample-note">Reviewed structure · sample script</span></div></div>
+            <label for="idea">Your idea</label><textarea id="idea" rows="3" maxlength="2000" readonly>Explain the water cycle to a beginner, using a clear diagram.</textarea>
+            <p id="idea-help" class="helper">Offline mode loads a curated lesson. Add a Gemini key to plan your own topic.</p>
+            <div class="two-fields"><div><label for="duration">Video length</label><select id="duration"><option value="30">30 seconds</option><option value="60">60 seconds</option><option value="90">90 seconds</option></select></div><div><label for="template">Visual style</label><select id="template"><option value="water-cycle">Illustrated water cycle</option><option value="concept-flow">Animated process diagram</option></select></div></div>
+            <div class="form-footer"><span>Portrait video · 9:16</span><button id="create" class="primary" type="submit">Prepare my plan <span>→</span></button></div>
+          </form>
+          <section id="plan-section" class="card" hidden>
+            <div class="card-heading"><span class="small-icon">▤</span><h2>Your video plan</h2><span id="source" class="tag"></span></div>
+            <p class="helper">Review the narration and diagram together. Both languages remain editable.</p>
+            <div class="two-fields"><div><label for="title-en">English title</label><input id="title-en" maxlength="38"></div><div><label for="title-te">Telugu title</label><input id="title-te" lang="te" maxlength="45"></div></div>
+            <div id="scenes"></div>
+            <div class="output-settings"><h3>Make it yours</h3><div class="two-fields"><div><label for="spoken">Video language</label><select id="spoken"><option value="en">English</option><option value="te">తెలుగు · Telugu</option></select><p id="caption-note" class="helper">English narration with English subtitles.</p></div><div><label for="accent">Accent preference</label><select id="accent"><option value="Indian">Indian</option><option value="Neutral">Neutral</option></select></div></div>
+              <label for="scale">Export quality</label><select id="scale"><option value="0.5">540p · faster preview</option><option value="1">1080p · full HD</option></select><p id="voice-note" class="helper"></p>
+            </div>
+            <div class="save-row"><span id="save-status">All changes saved</span><button id="save" class="secondary" disabled>Save changes</button></div>
+            <label class="approval"><input type="checkbox" id="approve"><span>I’ve reviewed this plan and these language settings.</span></label>
+            <button id="generate" class="primary wide" disabled>Approve & generate video <span>→</span></button>
+          </section>
+          <section id="job-section" class="card" hidden><div class="card-heading"><span class="small-icon">◷</span><h2 id="job-title">Creating your video</h2></div><p id="job-description" class="helper"></p><div class="progress-track"><div id="progress"></div></div><details><summary>Pipeline details</summary><pre id="logs"></pre></details></section>
+        </section>
+        <aside class="preview-column"><section class="preview-card"><div class="preview-heading"><span class="eyebrow">THE PREVIEW</span><span id="preview-label" class="tag">OFFLINE SAMPLE</span></div><div class="phone"><video id="player" controls preload="metadata" playsinline></video><div id="empty-preview" hidden>Your video will appear here.</div></div><h3 id="video-title">The water cycle</h3><p id="video-description">A real rendered sample, ready to explore.</p><div class="download-row"><a id="download" class="primary" download>Download MP4 ↓</a><a id="captions-download" class="secondary" download>Captions</a></div><p class="preview-note">Offline narration is robotic test speech. Natural Indian-English and Telugu voices need live API evaluation.</p></section><div class="publish-note"><span>↗</span><div><b>Publishing comes next</b><p>Instagram connection and scheduling belong to the application build.</p></div></div></aside>
+      </div>
+      <section id="library" class="library"><div class="library-heading"><div><p class="eyebrow blue">YOUR OUTPUTS</p><h2>Ready for a closer look.</h2></div><span id="video-count" class="tag">0 VIDEOS</span></div><div id="videos" class="video-grid"></div></section>
+      <footer>VideoCraft / Prototype studio <span>No cloud deployment. No subscription or usage billing.</span></footer>
+    </div>
+  </main>
+</body></html>

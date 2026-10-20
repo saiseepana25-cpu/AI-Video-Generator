@@ -1,0 +1,369 @@
+{
+  "waterExtras": [
+    [
+      [
+        "Water can be liquid, ice, or vapour.",
+        "నీరు ద్రవంగా, మంచుగా, ఆవిరిగా ఉంటుంది."
+      ],
+      [
+        "The cycle moves water between these forms.",
+        "ఈ చక్రంలో నీరు రూపాలను మార్చుకుంటుంది."
+      ],
+      [
+        "Water is reused as it moves.",
+        "ప్రయాణంలో నీరు మళ్లీ ఉపయోగపడుతుంది."
+      ],
+      [
+        "It does not disappear when it evaporates.",
+        "ఆవిరైనప్పుడు నీరు మాయమైపోదు."
+      ]
+    ],
+    [
+      [
+        "Evaporation happens at the water surface.",
+        "నీటి ఉపరితలం వద్ద ఆవిరి ఏర్పడుతుంది."
+      ],
+      [
+        "It can happen without water boiling.",
+        "నీరు మరిగిపోకుండానే ఆవిరవుతుంది."
+      ],
+      [
+        "Warmth supplies energy for this change.",
+        "ఈ మార్పుకు వేడి శక్తిని అందిస్తుంది."
+      ],
+      [
+        "Wind can help evaporation happen faster.",
+        "గాలి వీచితే నీరు త్వరగా ఆవిరవుతుంది."
+      ]
+    ],
+    [
+      [
+        "Water vapour itself is invisible.",
+        "నీటి ఆవిరి కంటికి కనిపించదు."
+      ],
+      [
+        "The droplets in clouds are visible.",
+        "మేఘాల్లోని నీటి బిందువులు కనిపిస్తాయి."
+      ],
+      [
+        "Some clouds also contain ice crystals.",
+        "కొన్ని మేఘాల్లో మంచు స్ఫటికాలు కూడా ఉంటాయి."
+      ],
+      [
+        "Cooling helps vapour turn into droplets.",
+        "చల్లదనం ఆవిరిని బిందువులుగా మారుస్తుంది."
+      ]
+    ],
+    [
+      [
+        "Rain is one kind of precipitation.",
+        "అవపాతంలో వర్షం ఒక రకం."
+      ],
+      [
+        "Snow and hail are other kinds.",
+        "మంచు, వడగళ్లు ఇతర రకాలు."
+      ],
+      [
+        "Conditions in the air affect the form.",
+        "గాలిలోని పరిస్థితులు రూపాన్ని ప్రభావితం చేస్తాయి."
+      ],
+      [
+        "Gravity pulls falling water toward the ground.",
+        "గురుత్వాకర్షణ నీటిని నేలవైపు లాగుతుంది."
+      ]
+    ],
+    [
+      [
+        "Some water flows over the land.",
+        "కొంత నీరు నేలపై ప్రవహిస్తుంది."
+      ],
+      [
+        "Some water soaks into the ground.",
+        "కొంత నీరు నేలలోకి ఇంకుతుంది."
+      ],
+      [
+        "Plants also return water to the air.",
+        "మొక్కలు కూడా నీటిని గాలిలోకి వదులుతాయి."
+      ],
+      [
+        "The sun helps keep this cycle moving.",
+        "ఈ చక్రం కొనసాగడానికి సూర్యుడు సహాయపడతాడు."
+      ]
+    ]
+  ],
+  "seedPlan": {
+    "schemaVersion": 1,
+    "template": "concept-flow",
+    "title": {
+      "en": "How a seed grows",
+      "te": "విత్తనం ఎలా మొలకెత్తుతుంది?"
+    },
+    "objective": {
+      "en": "Explain the stages of germination and early plant growth.",
+      "te": "విత్తనం మొలకెత్తడం, మొక్క పెరగడం వివరించడం."
+    },
+    "targetSeconds": 90,
+    "scenes": [
+      {
+        "id": "seed",
+        "phase": "concept",
+        "label": {
+          "en": "A resting seed",
+          "te": "నిద్రాణమైన విత్తనం"
+        },
+        "phrases": [
+          {
+            "id": "seed-1",
+            "text": {
+              "en": "A seed holds a tiny young plant.",
+              "te": "విత్తనంలో చిన్న మొక్క ఉంటుంది."
+            }
+          },
+          {
+            "id": "seed-2",
+            "text": {
+              "en": "Its coat protects what is inside.",
+              "te": "విత్తనపు పొర లోపలి భాగాన్ని రక్షిస్తుంది."
+            }
+          },
+          {
+            "id": "seed-3",
+            "text": {
+              "en": "Stored food supports the plant at first.",
+              "te": "నిల్వ ఉన్న ఆహారం మొదట మొక్కకు ఉపయోగపడుతుంది."
+            }
+          },
+          {
+            "id": "seed-4",
+            "text": {
+              "en": "Seeds can wait before they begin growing.",
+              "te": "విత్తనాలు పెరగడానికి ముందు వేచి ఉండగలవు."
+            }
+          },
+          {
+            "id": "seed-5",
+            "text": {
+              "en": "Different seeds have different needs.",
+              "te": "వేర్వేరు విత్తనాలకు వేర్వేరు అవసరాలు ఉంటాయి."
+            }
+          },
+          {
+            "id": "seed-6",
+            "text": {
+              "en": "We call the start of growth germination.",
+              "te": "పెరుగుదల మొదలవడాన్ని మొలకెత్తడం అంటారు."
+            }
+          }
+        ]
+      },
+      {
+        "id": "water",
+        "phase": "concept",
+        "label": {
+          "en": "Water wakes it up",
+          "te": "నీటితో మొదలయ్యే పెరుగుదల"
+        },
+        "phrases": [
+          {
+            "id": "water-1",
+            "text": {
+              "en": "With water, warmth, and oxygen, growth can begin.",
+              "te": "నీరు, తగిన వేడి, ఆక్సిజన్ ఉంటే పెరుగుదల మొదలవుతుంది."
+            }
+          },
+          {
+            "id": "water-2",
+            "text": {
+              "en": "The seed absorbs water and swells.",
+              "te": "విత్తనం నీటిని పీల్చుకుని ఉబ్బుతుంది."
+            }
+          },
+          {
+            "id": "water-3",
+            "text": {
+              "en": "Water starts important processes inside the seed.",
+              "te": "నీరు విత్తనంలో ముఖ్యమైన ప్రక్రియలను ప్రారంభిస్తుంది."
+            }
+          },
+          {
+            "id": "water-4",
+            "text": {
+              "en": "Stored food becomes available for growth.",
+              "te": "నిల్వ ఉన్న ఆహారం పెరుగుదలకు అందుబాటులోకి వస్తుంది."
+            }
+          },
+          {
+            "id": "water-5",
+            "text": {
+              "en": "Too much water can reduce available oxygen.",
+              "te": "ఎక్కువ నీరు ఉంటే ఆక్సిజన్ అందడం తగ్గవచ్చు."
+            }
+          },
+          {
+            "id": "water-6",
+            "text": {
+              "en": "Suitable moisture helps the young plant develop.",
+              "te": "తగిన తేమ చిన్న మొక్క పెరగడానికి తోడ్పడుతుంది."
+            }
+          }
+        ]
+      },
+      {
+        "id": "root",
+        "phase": "concept",
+        "label": {
+          "en": "The first root",
+          "te": "మొదటి వేరు"
+        },
+        "phrases": [
+          {
+            "id": "root-1",
+            "text": {
+              "en": "A small root breaks through the seed coat.",
+              "te": "చిన్న వేరు విత్తనపు పొరను చీల్చుకుని వస్తుంది."
+            }
+          },
+          {
+            "id": "root-2",
+            "text": {
+              "en": "It usually grows down into the soil.",
+              "te": "అది సాధారణంగా నేలలోకి పెరుగుతుంది."
+            }
+          },
+          {
+            "id": "root-3",
+            "text": {
+              "en": "The root helps hold the plant in place.",
+              "te": "వేరు మొక్కను నిలకడగా ఉంచుతుంది."
+            }
+          },
+          {
+            "id": "root-4",
+            "text": {
+              "en": "It takes in water and dissolved minerals.",
+              "te": "అది నీటిని, కరిగిన ఖనిజాలను గ్రహిస్తుంది."
+            }
+          },
+          {
+            "id": "root-5",
+            "text": {
+              "en": "Tiny root hairs increase the absorbing surface.",
+              "te": "చిన్న వేరు వెంట్రుకలు నీరు పీల్చే ఉపరితలాన్ని పెంచుతాయి."
+            }
+          },
+          {
+            "id": "root-6",
+            "text": {
+              "en": "A growing root supports the next stage.",
+              "te": "పెరుగుతున్న వేరు తరువాతి దశకు తోడ్పడుతుంది."
+            }
+          }
+        ]
+      },
+      {
+        "id": "shoot",
+        "phase": "concept",
+        "label": {
+          "en": "The shoot rises",
+          "te": "పైకి వచ్చే అంకురం"
+        },
+        "phrases": [
+          {
+            "id": "shoot-1",
+            "text": {
+              "en": "Next, a shoot grows toward the surface.",
+              "te": "తరువాత అంకురం నేల పైకి పెరుగుతుంది."
+            }
+          },
+          {
+            "id": "shoot-2",
+            "text": {
+              "en": "The young stem lifts the first leaves.",
+              "te": "చిన్న కాండం మొదటి ఆకులను పైకి తీసుకువస్తుంది."
+            }
+          },
+          {
+            "id": "shoot-3",
+            "text": {
+              "en": "The stem connects the roots and leaves.",
+              "te": "కాండం వేర్లను, ఆకులను కలుపుతుంది."
+            }
+          },
+          {
+            "id": "shoot-4",
+            "text": {
+              "en": "Water can move upward through the stem.",
+              "te": "కాండం ద్వారా నీరు పైకి చేరుతుంది."
+            }
+          },
+          {
+            "id": "shoot-5",
+            "text": {
+              "en": "Early growth still uses stored food.",
+              "te": "మొదటి పెరుగుదలలో నిల్వ ఆహారం ఉపయోగపడుతుంది."
+            }
+          },
+          {
+            "id": "shoot-6",
+            "text": {
+              "en": "The young plant is now a seedling.",
+              "te": "ఈ చిన్న మొక్కను నారు మొక్క అంటారు."
+            }
+          }
+        ]
+      },
+      {
+        "id": "leaves",
+        "phase": "concept",
+        "label": {
+          "en": "Leaves make food",
+          "te": "ఆహారం తయారు చేసే ఆకులు"
+        },
+        "phrases": [
+          {
+            "id": "leaves-1",
+            "text": {
+              "en": "Green leaves use light to make sugars.",
+              "te": "పచ్చని ఆకులు వెలుతురుతో చక్కెరలను తయారు చేస్తాయి."
+            }
+          },
+          {
+            "id": "leaves-2",
+            "text": {
+              "en": "The seedling can now keep growing.",
+              "te": "ఇప్పుడు చిన్న మొక్క పెరుగుతూ ఉంటుంది."
+            }
+          },
+          {
+            "id": "leaves-3",
+            "text": {
+              "en": "This food-making process is called photosynthesis.",
+              "te": "ఈ ఆహార తయారీ ప్రక్రియను కిరణజన్య సంయోగక్రియ అంటారు."
+            }
+          },
+          {
+            "id": "leaves-4",
+            "text": {
+              "en": "It uses water and carbon dioxide.",
+              "te": "దీనికి నీరు, కార్బన్ డయాక్సైడ్ అవసరం."
+            }
+          },
+          {
+            "id": "leaves-5",
+            "text": {
+              "en": "The sugars provide energy and building material.",
+              "te": "చక్కెరలు శక్తిని, పెరుగుదలకు పదార్థాలను అందిస్తాయి."
+            }
+          },
+          {
+            "id": "leaves-6",
+            "text": {
+              "en": "With suitable conditions, more roots and leaves develop.",
+              "te": "తగిన పరిస్థితుల్లో మరిన్ని వేర్లు, ఆకులు పెరుగుతాయి."
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "videocraft-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local English/Telugu educational video pipeline proof of concept",
+  "scripts": {
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "web:start": "npm --prefix apps/web run start",
+    "web:typecheck": "npm --prefix apps/web run typecheck",
+    "dev": "tsx scripts/local-server.ts",
+    "start": "tsx scripts/local-server.ts",
+    "doctor": "tsx scripts/cli.ts doctor",
+    "connect:elevenlabs": "tsx scripts/cli.ts check-elevenlabs",
+    "plan": "tsx scripts/cli.ts plan",
+    "demo": "tsx scripts/cli.ts demo",
+    "render": "tsx scripts/cli.ts render",
+    "studio": "remotion studio src/video/index.tsx",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:media": "tsx scripts/verify-media.ts"
+  },
+  "dependencies": {
+    "@echogarden/espeak-ng-emscripten": "^0.3.0",
+    "@fontsource/noto-sans": "^5.2.0",
+    "@fontsource/noto-sans-telugu": "^5.2.0",
+    "@remotion/bundler": "4.0.536",
+    "@remotion/cli": "4.0.536",
+    "@remotion/renderer": "4.0.536",
+    "dotenv": "^16.4.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.536",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": { "node": ">=22" }
+}

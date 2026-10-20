@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "template": "water-cycle",
+  "title": {"en": "The water cycle", "te": "నీటి చక్రం"},
+  "objective": {"en": "Explain how water moves between land and sky.", "te": "భూమి, ఆకాశం మధ్య నీరు ఎలా ప్రయాణిస్తుందో వివరించడం."},
+  "targetSeconds": 30,
+  "scenes": [
+    {
+      "id": "intro", "phase": "overview", "label": {"en": "One continuous journey", "te": "నిరంతర ప్రయాణం"},
+      "phrases": [
+        {"id": "intro-a", "text": {"en": "Water moves between the earth and the sky.", "te": "నీరు భూమి, ఆకాశం మధ్య ప్రయాణిస్తుంది."}},
+        {"id": "intro-b", "text": {"en": "This journey is called the water cycle.", "te": "ఈ ప్రయాణాన్ని నీటి చక్రం అంటారు."}}
+      ]
+    },
+    {
+      "id": "evaporation", "phase": "evaporation", "label": {"en": "Evaporation", "te": "ఆవిరి కావడం"},
+      "phrases": [
+        {"id": "evap-a", "text": {"en": "The sun warms water in lakes and rivers.", "te": "సూర్యుడు నదులు, చెరువుల నీటిని వేడి చేస్తాడు."}},
+        {"id": "evap-b", "text": {"en": "Some water becomes invisible vapour and rises.", "te": "కొంత నీరు కనిపించని ఆవిరిగా మారి పైకి వెళుతుంది."}}
+      ]
+    },
+    {
+      "id": "condensation", "phase": "condensation", "label": {"en": "Condensation", "te": "బిందువులుగా మారడం"},
+      "phrases": [
+        {"id": "cond-a", "text": {"en": "Higher up, vapour cools into tiny droplets.", "te": "పైన చల్లబడిన ఆవిరి చిన్న బిందువులవుతుంది."}},
+        {"id": "cond-b", "text": {"en": "Together, these droplets form clouds.", "te": "ఈ బిందువులు కలిసి మేఘాలను ఏర్పరుస్తాయి."}}
+      ]
+    },
+    {
+      "id": "rain", "phase": "rain", "label": {"en": "Precipitation", "te": "వర్షం కురవడం"},
+      "phrases": [
+        {"id": "rain-a", "text": {"en": "Cloud droplets join together and grow heavier.", "te": "మేఘాల్లో బిందువులు కలిసి పెద్దవవుతాయి."}},
+        {"id": "rain-b", "text": {"en": "Water falls back to earth as rain.", "te": "అవి వర్షంగా భూమిపై పడతాయి."}}
+      ]
+    },
+    {
+      "id": "collection", "phase": "collection", "label": {"en": "Collection", "te": "నీరు చేరడం"},
+      "phrases": [
+        {"id": "collect-a", "text": {"en": "Rain collects in lakes, rivers, and soil.", "te": "వర్షపు నీరు నదులు, చెరువులు, నేలలో చేరుతుంది."}},
+        {"id": "collect-b", "text": {"en": "Then the water cycle begins again.", "te": "నీటి చక్రం మళ్లీ కొనసాగుతుంది."}}
+      ]
+    }
+  ]
+}

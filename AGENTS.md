@@ -1,0 +1,9 @@
+# VideoCraft development
+
+- Start by reading `PROJECT_STATUS.md`. It records implemented features, evidence, limitations and the next feature. Read the PRD and applicable API/database/design sections before changing behavior.
+- Build in small feature increments. Update `PROJECT_STATUS.md` in the same change whenever code is added or behavior changes. Record actual verification, remaining work and the next step; never mark stubs or configured credentials as working integrations.
+- Preserve the runnable root video prototype. The Next.js application and its dependency tree live in `apps/web`; root pipeline commands retain their existing meaning.
+- Use the approved Midnight Frame brand and the current screen links in `UI_REVIEW.md`. API/database contracts govern real states and available actions; illustrative mockup data does not add requirements.
+- Never print or commit credentials or `.env.local` contents. Keep provider credentials on the server and preserve the free-experiment and explicit approval gates.
+- Run checks appropriate to the feature and record their results in the status document. Do not claim browser/provider/database verification that was not performed.
+- GitHub workflow: use the user-requested `dev` branch at `https://github.com/saiseepana25-cpu/AI-Video-Generator.git`. After every completed feature milestone or independently reviewable development step, update `PROJECT_STATUS.md`, review the diff for credentials/generated/private files, run appropriate checks, commit the scoped change and push `dev`. The user has authorized these routine commits/pushes; do not ask again. Do not force-push or merge to another branch without instruction. If a push fails, record that it is pending and remind the user in the handoff; do not describe local-only changes as published. Do not create recurring reminders unless requested.
