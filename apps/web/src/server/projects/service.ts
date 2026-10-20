@@ -3,7 +3,7 @@ import {Long, ObjectId, type ClientSession, type Db, type Document, type MongoCl
 import {databaseTransaction} from '../db/transactions';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
 import {ProjectError, requireProjectId, type ProjectContext, type ProjectDetail, type ProjectInput, type ProjectPage, type ProjectSummary} from './contracts';
-import {escapeLiteralSearch, graphemes, parseProjectInput, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
+import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
 
 type Row = Document & {_id: string};
 type Actor = {kind: 'user'; userId: string} | {kind: 'system'; service: string};
@@ -33,9 +33,9 @@ export class ProjectService {
     if (!member) throw new ProjectError('TEAM_ACCESS_DENIED', 403, 'This account does not have team access.');
   }
 
-  private async names(rows: ProjectRecord[]) {
+  private async names(rows: ProjectRecord[], db = this.db, session?: ClientSession) {
     const ids = [...new Set(rows.flatMap(row => [row.createdBy, row.updatedBy]).filter(actor => actor.kind === 'user').map(actor => actor.userId))];
-    const users = ids.length ? await this.db.collection('users').find({_id: {$in: ids.map(id => new ObjectId(id))}}, {projection: {name: 1}, maxTimeMS: 5000}).toArray() : [];
+    const users = ids.length ? await db.collection('users').find({_id: {$in: ids.map(id => new ObjectId(id))}}, {session, projection: {name: 1}, maxTimeMS: 5000}).toArray() : [];
     return new Map(users.map(user => [user._id.toHexString(), safeName(user.name)]));
   }
 
@@ -48,9 +48,8 @@ export class ProjectService {
 
   private detail(row: ProjectRecord, names: Map<string, string>): ProjectDetail {
     return {...this.summary(row, names), brief: row.brief, settings: row.settings,
-      currentPlanVersionId: null, currentPlanInputHash: null, activePlanningJobId: null, allowedActions: [],
+      currentPlanVersionId: null, currentPlanInputHash: null, activePlanningJobId: null, allowedActions: ['edit'],
       blockedReasons: [
-        {action: 'edit', code: 'FEATURE_NOT_IMPLEMENTED', message: 'Draft editing is coming in the next feature.'},
         {action: 'create_plan', code: 'FEATURE_NOT_IMPLEMENTED', message: 'AI planning is not connected yet.'},
         {action: 'generate', code: 'FEATURE_NOT_IMPLEMENTED', message: 'Dashboard generation is not connected yet.'},
       ]};
@@ -134,6 +133,64 @@ export class ProjectService {
         await this.authorize();
         const winner = await replay(this.db);
         if (winner) return winner;
+      }
+      throw error;
+    }
+  }
+
+  async patch(id: string, raw: unknown, key: string): Promise<{project: ProjectDetail; replayed: boolean}> {
+    await this.authorize(); requireProjectId(id); requireIdempotencyKey(key);
+    const input = parseProjectPatch(raw), requestHash = hash(JSON.stringify(input));
+    const now = new Date(), eventId = randomUUID(), receiptId = randomUUID();
+    const actor = {kind: 'user' as const, userId: this.context.userId};
+    const identity = {workspaceId: this.context.workspaceId, userId: this.context.userId, routeScope: `PATCH /api/v1/projects/${id}`, keyHash: hash(key)};
+    const replay = async (db: Db, session?: ClientSession) => {
+      const receipt = await db.collection<Row>('idempotency_records').findOne({...identity, expiresAt: {$gt: now}}, {session});
+      if (!receipt) return null;
+      if (receipt.requestHash !== requestHash) throw new ProjectError('IDEMPOTENCY_MISMATCH', 409, 'This request key was used for different edits.');
+      if (!await db.collection<Row>('projects').findOne({_id: id, workspaceId: this.context.workspaceId, deletedAt: null}, {session, projection: {_id: 1}})) throw notFound();
+      return {project: receipt.safeResponseSnapshot as ProjectDetail, replayed: true};
+    };
+    try {
+      return await databaseTransaction(this.client, this.databaseName, async (db, session) => {
+        await this.authorize(db, session);
+        const existing = await replay(db, session); if (existing) return existing;
+        const filter = {_id: id, workspaceId: this.context.workspaceId, deletedAt: null};
+        const row = await db.collection<ProjectRecord>('projects').findOne(filter, {session});
+        if (!row) throw notFound();
+        const names = await this.names([row], db, session);
+        if (counter(row.revision) !== input.expectedProjectRevision) {
+          const current = this.summary(row, names);
+          throw new ProjectError('STALE_REVISION', 409, 'This project has newer saved changes. Review them before saving yours.', [], false,
+            {currentRevision: current.revision, updatedAt: current.updatedAt, updatedBy: current.updatedBy});
+        }
+        const brief = input.patch.brief ?? row.brief, settings = input.patch.settings ?? row.settings;
+        const changed = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
+        let saved = row;
+        if (changed) {
+          if (['currentPlanVersionId', 'latestRunId', 'latestReadyVideoId', 'activePlanningJobId', 'planningRequestId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing planned or generated projects is not available yet.');
+          if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
+          const updated = await db.collection<ProjectRecord>('projects').findOneAndUpdate({...filter, revision: Long.fromNumber(input.expectedProjectRevision)}, {
+            $set: {brief, settings, updatedAt: now, updatedBy: actor}, $inc: {revision: Long.ONE, briefRevision: Long.ONE, guardRevision: Long.ONE},
+          }, {session, returnDocument: 'after'});
+          if (!updated) throw new ProjectError('STALE_REVISION', 409, 'Reload and review the latest saved changes.');
+          saved = updated;
+          const workspace = await db.collection<Row>('workspaces').findOneAndUpdate({_id: this.context.workspaceId}, {$inc: {nextActivitySequence: Long.ONE}}, {session, returnDocument: 'after'});
+          if (!workspace) throw new ProjectError('CONNECTION_UNAVAILABLE', 503, 'The workspace is unavailable.', [], true);
+          await db.collection<Row>('activity_events').insertOne({_id: eventId, schemaVersion: 1, workspaceId: this.context.workspaceId,
+            projectId: id, sequence: workspace.nextActivitySequence, dedupeKey: `project_updated:${id}:${counter(saved.revision)}`, type: 'project_updated', actor,
+            resourceRefs: {projectId: id}, message: 'A project brief was updated.', actionNeeded: false, safeActionRoute: `/projects/${id}`, createdAt: now}, {session});
+        }
+        const snapshot = this.detail(saved, await this.names([saved], db, session));
+        await db.collection('idempotency_records').deleteOne({...identity, expiresAt: {$lte: now}}, {session});
+        await db.collection<Row>('idempotency_records').insertOne({_id: receiptId, schemaVersion: 1, ...identity, requestHash,
+          committedHttpStatus: 200, safeResultRef: {kind: 'project', id}, safeResponseSnapshot: snapshot,
+          createdAt: now, expiresAt: new Date(now.getTime() + 24 * 3600000)}, {session});
+        return {project: snapshot, replayed: false};
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 11000) {
+        await this.authorize(); const winner = await replay(this.db); if (winner) return winner;
       }
       throw error;
     }

@@ -1,5 +1,7 @@
 # VideoCraft — UI review
 
+F05 implementation reconciliation: UI-05's idea workspace and UI-22's save/conflict states now map to editable brief/audience/references and language/duration, a visible serialized autosave state, scoped tab recovery, copy/retry, and side-by-side conflict comparison. Keeping local changes pauses autosave until explicit confirmation. Voice/accent are separate disabled controls until F06. The original project title is retained until F14 rename. Generation/planning controls remain unavailable; no illustrative provider or render state is presented as working.
+
 Status: design set approved by the user, 20 October 2026. Midnight Frame / C is the selected brand. These are approved Stitch designs, not evidence of implemented routes or verified integrations. Implementation progress is tracked in [PROJECT_STATUS.md](PROJECT_STATUS.md).
 
 Project: [Generate AI Video](https://stitch.withgoogle.com/projects/14828656073434697599).

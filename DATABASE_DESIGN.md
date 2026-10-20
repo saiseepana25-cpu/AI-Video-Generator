@@ -17,6 +17,8 @@ Product scope remains Plan → Generate → Publish, English/English or Telugu/T
 
 ## Contents
 
+Implementation note — F05: migration `003_project_editing` widens only `idempotency_records` and `activity_events`; migrations 001/002 remain immutable. Receipts support project-specific PATCH route scopes, HTTP 200/201 and the `edit` action in safe snapshots while retaining older create snapshots. Activity adds `project_updated`. Existing unique replay/activity/TTL indexes are reused. Brief/settings edits use scoped expected-revision CAS with transaction-bound membership/actor reads; project, revisions, event counter, event and receipt commit together. A canonical no-op has a receipt but no revision/activity increment. Future active plan/run pointers currently cause edit refusal; job cancellation/invalidation awaits its feature. Runtime remains read-only for schema setup; stop application writes before the explicit migration command.
+
 1. [Invariants and ownership](#1-invariants-and-ownership)
 2. [Types and validation conventions](#2-types-and-validation-conventions)
 3. [Collections and relationships](#3-collections-and-relationships)

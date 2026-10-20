@@ -2,6 +2,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import {Long, type Db, type Document, type IndexDescription} from 'mongodb';
 import {authIndexes, migrationCollection, ownedCollections, type CollectionContract} from './schemas';
 import {projectCollections} from './project-schemas';
+import {editCollections} from './edit-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -17,9 +18,12 @@ export const foundationChecksum = createHash('sha256').update(JSON.stringify({
 
 export const projectMigration = {id: '002_project_library', description: 'Draft voice selection, command replay and project activity', contracts: projectCollections};
 export const projectChecksum = createHash('sha256').update(JSON.stringify(projectMigration)).digest('hex');
+export const editMigration = {id: '003_project_editing', description: 'Revision-checked brief edits and replay snapshots', contracts: editCollections};
+export const editChecksum = createHash('sha256').update(JSON.stringify(editMigration)).digest('hex');
 const migrations = [
   {definition: foundationMigration, checksum: foundationChecksum},
   {definition: projectMigration, checksum: projectChecksum},
+  {definition: editMigration, checksum: editChecksum},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

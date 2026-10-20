@@ -436,6 +436,10 @@ No body/query. **200 data:** complete `ProjectDetail` shape from API-05 with cur
 
 ### API-07 — `PATCH /api/v1/projects/{projectId}`
 
+**F05 implementation boundary (20 October 2026):** accepts only `brief` and/or `settings`, each a complete replacement. `displayTitle` remains F14 and `brainstormSelection` remains F07. The example rename below describes that future contract. Missing revision returns 428; unsupported keys return 400; invalid fields return 422. Same-origin, active membership, UUID idempotency key and 128 KiB JSON limits match creation. The route scope includes the project ID. Replay is checked before revision comparison and returns the original committed 200 snapshot; changed payload/revision under the same key returns 409. No-op replacements retain revisions/timestamps/activity count while committing a replay receipt. Changed generation inputs increment project/brief/guard revisions and append one `project_updated` event in the same transaction. Edits to projects with future plan/run pointers are refused until those features implement invalidation. `allowedActions` now includes `edit` for current drafts. Voice/accent remain null until F06; subtitles follow language.
+
+The editor serializes saves after roughly two idle seconds. New typing is preserved while an older save is in flight. Uncertain saves reuse the exact key/body before later changes. A stale save pauses autosave, loads a comparison, and offers either the saved version or keeping local edits for review followed by an explicit save. Tab-local recovery is scoped by workspace/user/project; a recovered pending command is resolved before discard/new saves. It is not a durable backup or cross-device sync.
+
 Required `expectedProjectRevision`, `patch`. Allowed patch keys: `displayTitle`, `brief` (whole `{idea,audience,references}` replacement), `settings` (whole SettingsInput replacement), optional `brainstormSelection:{jobId,angleId}` alongside the resulting brief. Nested objects are replaced, not recursively JSON-merged; no JSON Patch operations.
 
 ```json

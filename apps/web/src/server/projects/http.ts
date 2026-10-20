@@ -6,7 +6,7 @@ export function projectErrorResponse(error: unknown) {
   if (!(error instanceof ProjectError)) return authErrorResponse(error);
   const requestId = randomUUID();
   return Response.json({error: {code: error.code, message: error.message, retryable: error.retryable,
-    action: error.status === 404 ? 'return_to_projects' : error.status === 401 ? 'sign_in' : error.retryable ? 'retry_same_request' : 'correct_request',
-    fieldErrors: error.fieldErrors, details: {}}, meta: {requestId, serverTime: new Date().toISOString()}},
+    action: error.code === 'STALE_REVISION' ? 'reload_and_resolve' : error.status === 404 ? 'return_to_projects' : error.status === 401 ? 'sign_in' : error.retryable ? 'retry_same_request' : 'correct_request',
+    fieldErrors: error.fieldErrors, details: error.details}, meta: {requestId, serverTime: new Date().toISOString()}},
   {status: error.status, headers: {'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff', 'X-Request-ID': requestId}});
 }

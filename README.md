@@ -1,5 +1,7 @@
 # VideoCraft
 
+The Next.js dashboard now supports editing saved briefs and video options with autosave and conflict recovery (F05). Run the explicit database migration/check with app writes stopped before starting the upgraded dashboard. Local unsaved work can be restored in the same browser tab; closing the tab or clearing browser storage can remove it. Voice selection and AI planning are subsequent milestones. See [Project Status](PROJECT_STATUS.md) for measured verification and the remaining feature roadmap.
+
 Development progress, feature scope, verification and next steps live in **[PROJECT_STATUS.md](PROJECT_STATUS.md)**. Update that file alongside each feature change.
 
 ## Dashboard application — shared project library

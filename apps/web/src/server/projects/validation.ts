@@ -68,6 +68,24 @@ export function parseProjectInput(value: unknown): ProjectInput {
 }
 
 export type ListOptions = {q: string; limit: number; cursor: string | null; order: 'updated_desc'};
+export type ProjectPatch = {expectedProjectRevision: number; patch: {brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']}};
+export function parseProjectPatch(value: unknown): ProjectPatch {
+  const body = object(value, ['expectedProjectRevision', 'patch'], '/');
+  if (body.expectedProjectRevision === undefined) throw new ProjectError('PRECONDITION_REQUIRED', 428, 'Include the saved project revision.');
+  if (!Number.isSafeInteger(body.expectedProjectRevision) || (body.expectedProjectRevision as number) < 1) fail('/expectedProjectRevision', 'Use a positive safe integer revision.');
+  const raw = object(body.patch, ['brief', 'settings'], '/patch');
+  if (!Object.keys(raw).length) fail('/patch', 'Include a brief or settings replacement.');
+  const patch: ProjectPatch['patch'] = {};
+  const defaults = {language: 'en', targetSeconds: 60, accentId: null, voiceCatalogId: null, brandKitRevisionId: null, themeId: 'clean-educational-v1', captionStyleId: 'readable-default-v1'};
+  if ('brief' in raw) {
+    const brief = object(raw.brief, ['idea', 'audience', 'references'], '/patch/brief');
+    for (const key of ['idea', 'audience', 'references']) if (brief[key] === undefined) fail(`/patch/brief/${key}`, 'Include every brief field for replacement.');
+    const checked = parseProjectInput({...brief, settings: defaults});
+    patch.brief = {idea: checked.idea, audience: checked.audience, references: checked.references};
+  }
+  if ('settings' in raw) patch.settings = parseProjectInput({idea: 'Validation', settings: raw.settings}).settings;
+  return {expectedProjectRevision: body.expectedProjectRevision as number, patch};
+}
 export function parseListOptions(params: URLSearchParams): ListOptions {
   const allowed = ['q', 'limit', 'cursor', 'order'];
   for (const key of params.keys()) if (!allowed.includes(key) || params.getAll(key).length !== 1) throw new ProjectError('INVALID_QUERY', 400, 'Use supported query fields once each.');

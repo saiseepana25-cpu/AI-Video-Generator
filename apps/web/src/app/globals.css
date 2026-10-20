@@ -304,6 +304,28 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+.draft-editor fieldset { border: 0; padding: 0; margin: 24px 0; min-width: 0; }
+.draft-editor label, .copy-draft label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; margin: 18px 0 8px; }
+.draft-editor textarea, .draft-editor input, .draft-editor select, .copy-draft textarea { width: 100%; min-width: 0; min-height: 44px; border: 1px solid #7B8498; border-radius: 10px; background: #101218; color: #F4F2FA; padding: 12px; font: inherit; }
+.draft-editor textarea, .copy-draft textarea { resize: vertical; line-height: 1.7; }
+.editor-heading, .editor-actions, .editor-options { display: flex; gap: 16px; flex-wrap: wrap; }
+.editor-heading { align-items: center; justify-content: space-between; }
+.editor-heading h2 { margin: 12px 0; }
+.save-status { font-size: 12px; color: #7EDDCF; }
+.editor-options > label { flex: 1; min-width: 150px; }
+.recovery-panel { margin: 20px 0; padding: 18px; border: 1px solid #B7A4FF; border-radius: 12px; background: #242936; overflow-wrap: anywhere; }
+.recovery-panel h3 { font-size: 16px; margin: 0 0 12px; }
+.recovery-panel p { font-size: 13px; line-height: 1.7; }
+.editor-actions { margin-top: 16px; align-items: flex-start; }
+.editor-actions .button { white-space: normal; }
+.editor-references { border-top: 1px solid #343946; margin-top: 24px; padding-top: 12px; }
+.editor-references summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.reference-edit { border-bottom: 1px solid #343946; padding: 0 0 16px; margin-bottom: 16px; }
+.conflict-columns { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+.conflict-columns > div { min-width: 0; border: 1px solid #343946; border-radius: 8px; padding: 12px; }
+.conflict-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy-draft { max-width: 100%; }
+@media (max-width: 760px) { .conflict-columns { grid-template-columns: 1fr; } .editor-options > label { min-width: 0; flex-basis: 100%; } }
 @media (max-width: 380px) {
   .studio-nav { gap: 4px; }
   .nav-link { min-width: 0; gap: 6px; padding: 10px 4px; font-size: 11px; }

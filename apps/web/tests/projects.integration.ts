@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {checkDatabase, migrateDatabase} from '../src/server/db/migrations';
-import {projectCollections} from '../src/server/db/project-schemas';
+import {editCollections} from '../src/server/db/edit-schemas';
 import {ProjectService} from '../src/server/projects/service';
 import {ProjectError, type ProjectContext} from '../src/server/projects/contracts';
 import {parseListOptions} from '../src/server/projects/validation';
@@ -46,7 +46,7 @@ describe('shared project library on a real local replica set', {concurrency: fal
       const result = await service.create({...input(), idea: language === 'te' ? 'నీటి చక్రం గురించి వివరించండి.' : input().idea, settings: {...input().settings, language}}, randomUUID());
       assert.equal(result.replayed, false); assert.equal(result.project.settings.language, language);
       assert.equal(result.project.settings.voiceCatalogId, null); assert.equal(result.project.settings.accentId, null);
-      assert.deepEqual(result.project.allowedActions, []);
+      assert.deepEqual(result.project.allowedActions, ['edit']);
       const persisted = await db.collection<Row>('projects').findOne({_id: result.project.id});
       assert.ok(Long.isLong(persisted?.revision)); assert.equal(persisted?.workspaceId, context.workspaceId);
       assert.equal(await db.collection('activity_events').countDocuments({projectId: result.project.id}), 1);
@@ -152,12 +152,63 @@ describe('shared project library on a real local replica set', {concurrency: fal
   test('an event-write failure rolls back project, command receipt and counter together', async () => {
     const projects = await db.collection('projects').countDocuments(), receipts = await db.collection('idempotency_records').countDocuments();
     const previous = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
-    const eventContract = projectCollections.find(contract => contract.name === 'activity_events')!;
+    const eventContract = editCollections.find(contract => contract.name === 'activity_events')!;
     await db.command({collMod: 'activity_events', validator: {$jsonSchema: {bsonType: 'object', required: ['controlled_failure']}}});
     try {await assert.rejects(service.create(input(), randomUUID()), error => !!error && typeof error === 'object' && 'code' in error && error.code === 121);}
     finally {await db.command({collMod: 'activity_events', validator: eventContract.validator});}
     assert.equal(await db.collection('projects').countDocuments(), projects);
     assert.equal(await db.collection('idempotency_records').countDocuments(), receipts);
     assert.equal((await db.collection<Row>('workspaces').findOne({_id: context.workspaceId}))?.nextActivitySequence.toString(), previous?.nextActivitySequence.toString());
+  });
+  test('edits replace brief/settings and atomically advance revisions, activity and replay exactly once', async () => {
+    const first = (await service.create(input(), randomUUID())).project, key = randomUUID();
+    const body = {expectedProjectRevision: 1, patch: {brief: {...first.brief, idea: 'Explain solar panels to children.'}, settings: {...first.settings, language: 'te', targetSeconds: 30}}};
+    const results = await Promise.all(Array.from({length: 4}, () => service.patch(first.id, body, key)));
+    assert.equal(results.filter(r => !r.replayed).length, 1);
+    for (const result of results) {assert.equal(result.project.revision, 2); assert.equal(result.project.briefRevision, 2); assert.equal(result.project.settings.language, 'te');}
+    assert.equal(await db.collection('activity_events').countDocuments({projectId: first.id, type: 'project_updated'}), 1);
+    const row = await db.collection<Row>('projects').findOne({_id: first.id});
+    assert.equal(row?.guardRevision.toString(), '1');
+    const next = await service.patch(first.id, {expectedProjectRevision: 2, patch: {brief: {...first.brief, idea: 'Third revision'}}}, randomUUID());
+    assert.equal(next.project.revision, 3);
+    assert.deepEqual((await service.patch(first.id, body, key)).project, results[0].project);
+    await assert.rejects(service.patch(first.id, {...body, expectedProjectRevision: 3}, key), hasCode('IDEMPOTENCY_MISMATCH'));
+    await checkDatabase(db);
+  });
+
+  test('concurrent different edits reject the stale writer without overwriting its winner', async () => {
+    const first = (await service.create(input(), randomUUID())).project;
+    const results = await Promise.allSettled(['Writer A', 'Writer B'].map(idea => service.patch(first.id, {expectedProjectRevision: 1, patch: {brief: {...first.brief, idea}}}, randomUUID())));
+    assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+    const loser = results.find(r => r.status === 'rejected'); assert.ok(loser?.status === 'rejected');
+    assert.equal(loser.reason.code, 'STALE_REVISION'); assert.equal(loser.reason.details.currentRevision, 2);
+    assert.equal(typeof loser.reason.details.updatedBy.name, 'string'); assert.ok(!('email' in loser.reason.details.updatedBy));
+    assert.equal((await service.get(first.id)).revision, 2);
+    assert.equal(await db.collection('activity_events').countDocuments({projectId: first.id}), 2);
+  });
+
+  test('no-op and logically expired edit receipts preserve counters; deleted/missing edits are denied', async () => {
+    const first = (await service.create(input(), randomUUID())).project, key = randomUUID();
+    const body = {expectedProjectRevision: 1, patch: {brief: first.brief}};
+    const before = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
+    assert.equal((await service.patch(first.id, body, key)).project.revision, 1);
+    await db.collection('idempotency_records').updateOne({routeScope: `PATCH /api/v1/projects/${first.id}`}, {$set: {expiresAt: new Date(0)}});
+    assert.equal((await service.patch(first.id, body, key)).replayed, false);
+    assert.equal((await db.collection<Row>('workspaces').findOne({_id: context.workspaceId}))?.nextActivitySequence.toString(), before?.nextActivitySequence.toString());
+    await db.collection<Row>('projects').updateOne({_id: first.id}, {$set: {deletedAt: new Date(), deletedBy: {kind: 'user', userId: context.userId}}});
+    await assert.rejects(service.patch(first.id, body, key), hasCode('RESOURCE_NOT_FOUND'));
+    await assert.rejects(service.patch(randomUUID(), body, randomUUID()), hasCode('RESOURCE_NOT_FOUND'));
+  });
+
+  test('failed edit receipt rolls back the project, activity and workspace counter', async () => {
+    const first = (await service.create(input(), randomUUID())).project;
+    const before = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
+    const receipt = editCollections.find(c => c.name === 'idempotency_records')!;
+    await db.command({collMod: 'idempotency_records', validator: {$jsonSchema: {bsonType: 'object', required: ['controlled_failure']}}});
+    try {await assert.rejects(service.patch(first.id, {expectedProjectRevision: 1, patch: {brief: {...first.brief, idea: 'Must roll back'}}}, randomUUID()));}
+    finally {await db.command({collMod: 'idempotency_records', validator: receipt.validator});}
+    assert.deepEqual(await service.get(first.id), first);
+    assert.equal(await db.collection('activity_events').countDocuments({projectId: first.id}), 1);
+    assert.equal((await db.collection<Row>('workspaces').findOne({_id: context.workspaceId}))?.nextActivitySequence.toString(), before?.nextActivitySequence.toString());
   });
 });
