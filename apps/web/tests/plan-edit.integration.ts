@@ -65,4 +65,22 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
     await assert.rejects(edits.edit(base._id, {expectedProjectRevision: 1, edits: {narration: [{segmentId: 'scene_1', text: 'నీరు'}]}}, randomUUID()), /selected language/);
     assert.equal(await db.collection('plan_versions').countDocuments(), 1); assert.equal((await projects.get(base.projectId)).revision, 1);
   });
+  test('diagram-only saves preserve spoken content and immutable originals while changing content hash and layout', async () => {
+    const before = await db.collection<PlanVersion>('plan_versions').findOne({_id: base._id});
+    const saved = await edits.edit(base._id, {expectedProjectRevision: 1, edits: {diagrams: [{sceneId: 'scene_1', labels: ['Rain', 'River', 'Sea'], layout: 'sequence'}]}}, randomUUID());
+    assert.deepEqual(saved.plan.plan.captions, base.plan.captions); assert.equal(saved.plan.plan.scenes[0].narration, base.plan.scenes[0].narration);
+    assert.deepEqual(saved.plan.plan.scenes[0].labels, ['Rain', 'River', 'Sea']); assert.equal(saved.plan.plan.scenes[0].layout, 'sequence');
+    assert.deepEqual(await db.collection<PlanVersion>('plan_versions').findOne({_id: base._id}), before); assert.equal(saved.plan.parentPlanVersionId, base._id); assert.match(saved.plan.contentHash!, /^[a-f0-9]{64}$/);
+    await checkDatabase(db);
+  });
+  test('mixed diagram/text commands replay once; invalid or stale diagram replacements cannot create versions', async () => {
+    const key = randomUUID(), input = {...body(), edits: {...body().edits, diagrams: [{sceneId: 'scene_1', labels: ['Rain', 'River'], layout: 'comparison'}]}};
+    const results = await Promise.all(Array.from({length: 3}, () => edits.edit(base._id, input, key)));
+    assert.equal(new Set(results.map(r => r.plan.id)).size, 1); assert.equal(await db.collection('plan_versions').countDocuments(), 2);
+    await assert.rejects(edits.edit(base._id, {...input, edits: {...input.edits, diagrams: [{...input.edits.diagrams[0], layout: 'cycle'}]}}, key), /different plan edits/);
+    await assert.rejects(edits.edit(base._id, input, randomUUID()), /has changed/);
+    const saved = results[0].plan;
+    await assert.rejects(edits.edit(saved.id, {expectedProjectRevision: 2, edits: {diagrams: [{sceneId: 'scene_8', labels: ['Unknown', 'Scene'], layout: 'cycle'}]}}, randomUUID()), /Structural/);
+    assert.equal(await db.collection('plan_versions').countDocuments(), 2);
+  });
 });

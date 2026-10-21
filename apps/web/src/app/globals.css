@@ -336,6 +336,9 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 .plan-text-editor { margin: 18px 0; }
 .plan-text-editor fieldset { margin: 12px 0; }
 .plan-text-fields { border-top: 1px solid #7B8498; margin-top: 20px; padding-top: 8px; }
+.diagram-editor { margin-top: 20px; border-top: 1px solid #7B8498; padding-top: 8px; }
+.diagram-label-edit { margin-bottom: 18px; }
+.diagram-label-edit .button { font-size: 12px; margin-top: 4px; }
 .plan-preview p, .planning-angles p { font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
 .plan-preview summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-size: 13px; color: #7EDDCF; }
 .diagram-proposal { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px 0; }

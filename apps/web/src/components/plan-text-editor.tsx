@@ -28,7 +28,7 @@ export function PlanTextEditor({plan, enabled, scope, onEditing, onSaved}: {plan
   }, []);
   function start() {
     const base: TextBase = {id: plan.id, projectRevision: plan.projectRevision, versionNumber: plan.versionNumber, language: plan.plan.language,
-      scenes: plan.plan.scenes.map(({sceneId, heading, narration}) => ({sceneId, heading, narration}))};
+      scenes: plan.plan.scenes.map(({sceneId, heading, narration, labels, layout}) => ({sceneId, heading, narration, labels: [...labels], layout}))};
     setMessage(''); update({version: 1, scope: storageKey, base, scenes: structuredClone(base.scenes), pending: null});
   }
   async function save() {
@@ -50,17 +50,24 @@ export function PlanTextEditor({plan, enabled, scope, onEditing, onSaved}: {plan
   }
   const changed = !!work && Object.keys(textChanges(work.base, work.scenes).edits).length > 0;
   return <div className="plan-text-editor">
-    {!work && <Button variant="secondary" disabled={!loaded || !enabled || !plan.canEdit} onClick={start}>Edit narration & headings</Button>}
+    {!work && <Button variant="secondary" disabled={!loaded || !enabled || !plan.canEdit} onClick={start}>Edit plan</Button>}
     {message && <p role="status" className="muted-copy">{message}</p>}
-    {work && <div className="recovery-panel" lang={work.base.language}><h4>Editing plan version {work.base.versionNumber}</h4><p>Saving creates a new version. Subtitles update to match your narration.</p>
+    {work && <div className="recovery-panel" lang={work.base.language}><h4>Editing plan version {work.base.versionNumber}</h4><p>Save narration, headings and diagram proposals as a new version. Subtitles match your narration.</p>
       {(plan.id !== work.base.id || plan.projectRevision !== work.base.projectRevision || !plan.canEdit) && <p className="form-error" role="alert">The saved project or plan has changed. Your text is retained; copy it or discard this draft to review the latest plan.</p>}
       <fieldset disabled={saving || !!work.pending}>{work.scenes.map((scene, i) => <div className="plan-text-fields" key={scene.sceneId}>
-        <label htmlFor={`plan-heading-${scene.sceneId}`}>Scene {i + 1} heading<input id={`plan-heading-${scene.sceneId}`} value={scene.heading} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, heading: e.target.value} : s)})}/></label>
-        <label htmlFor={`plan-narration-${scene.sceneId}`}>Scene {i + 1} narration<textarea id={`plan-narration-${scene.sceneId}`} rows={4} value={scene.narration} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, narration: e.target.value} : s)})}/></label>
+        <label htmlFor={`plan-heading-${scene.sceneId}`}>Scene {i + 1} heading<input id={`plan-heading-${scene.sceneId}`} maxLength={10000} value={scene.heading} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, heading: e.target.value} : s)})}/></label>
+        <label htmlFor={`plan-narration-${scene.sceneId}`}>Scene {i + 1} narration<textarea id={`plan-narration-${scene.sceneId}`} maxLength={10000} rows={4} value={scene.narration} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, narration: e.target.value} : s)})}/></label>
         <p className="muted-copy">Heading: up to 140 characters · Narration: up to 1,000 characters</p><details><summary>Matching subtitles</summary><p className="conflict-text">{scene.narration}</p></details>
+        {scene.labels && scene.layout ? <div className="diagram-editor">
+          <label htmlFor={`plan-layout-${scene.sceneId}`}>Scene {i + 1} diagram layout<select id={`plan-layout-${scene.sceneId}`} value={scene.layout} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, layout: e.target.value as 'sequence' | 'cycle' | 'comparison'} : s)})}><option value="sequence">Sequence</option><option value="cycle">Cycle</option><option value="comparison">Comparison</option></select></label>
+          <p className="muted-copy">Two to five labels, up to 100 characters each. Labels appear in this order. Check that the diagram accurately explains the narration.</p>
+          {scene.labels.map((label, n) => <div className="diagram-label-edit" key={n}><label htmlFor={`plan-label-${scene.sceneId}-${n}`}>Scene {i + 1} label {n + 1}<input id={`plan-label-${scene.sceneId}-${n}`} maxLength={1000} value={label} onChange={e => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, labels: s.labels!.map((v, at) => at === n ? e.target.value : v)} : s)})}/></label><Button variant="secondary" disabled={scene.labels!.length <= 2} onClick={() => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, labels: s.labels!.filter((_, at) => at !== n)} : s)})}>Remove label {n + 1} from scene {i + 1}</Button></div>)}
+          <Button variant="secondary" disabled={scene.labels.length >= 5} onClick={() => update({...work, scenes: work.scenes.map(s => s.sceneId === scene.sceneId ? {...s, labels: [...s.labels!, '']} : s)})}>Add label to scene {i + 1}</Button>
+          <p className="muted-copy">Diagram preview · {scene.layout}</p><div className={`diagram-proposal diagram-${scene.layout}`} aria-label={`Scene ${i + 1} diagram preview`}>{scene.labels.map((label, n) => <span key={n}>{label || 'Label…'}</span>)}</div>
+        </div> : <p className="muted-copy">Recovered text-only draft. Finish or discard it, then reopen Edit plan to change diagrams.</p>}
       </div>)}</fieldset>
       <div className="editor-actions"><Button disabled={saving || !work.pending && !changed} onClick={() => void save()}>{saving ? 'Saving version…' : work.pending ? 'Check same save' : 'Save as new version'}</Button>
-        {!work.pending && <Button variant="secondary" disabled={saving} onClick={() => {update(null); setMessage('');}}>Discard text edits</Button>}<CopyDraft text={work.scenes.map(s => `${s.heading}\n${s.narration}`).join('\n\n')}/></div>
+        {!work.pending && <Button variant="secondary" disabled={saving} onClick={() => {update(null); setMessage('');}}>Discard edits</Button>}<CopyDraft text={work.scenes.map(s => `${s.heading}\n${s.narration}${s.labels ? `\n${s.layout}: ${s.labels.join(' → ')}` : ''}`).join('\n\n')}/></div>
     </div>}
   </div>;
 }

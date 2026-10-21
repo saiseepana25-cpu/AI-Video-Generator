@@ -65,7 +65,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
     {plan && <div className="plan-preview" lang={plan.plan.language}><div className="editor-heading"><h3>{plan.plan.title}</h3><span className="neutral-badge">{outdated ? 'Outdated proposal' : `Plan version ${plan.versionNumber}`}</span></div><p>{plan.plan.learningObjective}</p>{outdated && <p className="form-error">This plan uses an earlier brief. Prepare a new plan to include your changes.</p>}
       <PlanTextEditor plan={plan} enabled={ready && !outdated && !active && !command && !sending} scope={scope} onEditing={setEditing} onSaved={async () => {await onProjectSaved(); await load();}}/>
       {!editing && plan.plan.scenes.map((scene, i) => <article className="plan-scene" key={scene.sceneId}><span className="section-index">SCENE {i + 1} · {scene.layout}</span><h4>{scene.heading}</h4><div className={`diagram-proposal diagram-${scene.layout}`} aria-label={`${scene.layout} diagram proposal`}>{scene.labels.map((label, n) => <span key={n}>{label}</span>)}</div><p>{scene.narration}</p><details><summary>Matching subtitles</summary><p>{plan.plan.captions.find(c => c.sourceSegmentId === scene.sceneId)?.text}</p></details></article>)}
-      <div className="recovery-panel">{plan.plan.reviewNotes.map(note => <p key={note}>{note}</p>)}<p>Diagram editing, approval and video generation are upcoming features.</p></div>
+      <div className="recovery-panel">{plan.plan.reviewNotes.map(note => <p key={note}>{note}</p>)}<p>Version history, approval and video generation are upcoming features.</p></div>
     </div>}
   </section>;
 }

@@ -30,3 +30,33 @@ test('plan recovery retains blank/unfinished text and exact pending commands but
   assert.equal(recoverPlanText(JSON.stringify({...value, pending: {...value.pending, body: {expectedProjectRevision: 1, edits: {}}}}), value.scope), null);
   assert.equal(recoverPlanText(JSON.stringify({...value, scenes: [...scenes, scenes[0]]}), value.scope), null);
 });
+
+test('diagram replacements are bounded, canonical and reject unsafe labels, layouts and repeated scene IDs', () => {
+  const good = {sceneId: 'scene_1', labels: [' Water ', 'Air'], layout: 'sequence'};
+  const parsed = parseTextEdits({expectedProjectRevision: 1, edits: {diagrams: [good]}});
+  assert.deepEqual(parsed.edits.diagrams?.[0].labels, ['Water', 'Air']);
+  for (const diagrams of [[], [good, good], [{...good, sceneId: 'new'}], [{...good, layout: 'html'}], [{...good, labels: ['one']}], [{...good, labels: Array(6).fill('x')}], [{...good, labels: ['', 'two']}], [{...good, labels: ['<svg>', 'two']}], [{...good, labels: ['line\nbreak', 'two']}], [{...good, labels: ['x'.repeat(101), 'two']}], [{...good, labels: [1, 'two']}], [{...good, code: 'run'}]]) assert.throws(() => parseTextEdits({expectedProjectRevision: 1, edits: {diagrams}}));
+});
+test('diagram edits preserve narration, captions, other scenes and originals; selected language remains enforced', () => {
+  const input = parseTextEdits({expectedProjectRevision: 1, edits: {diagrams: [{sceneId: 'scene_1', labels: ['Rain', 'River', 'Sea'], layout: 'sequence'}]}});
+  const before = structuredClone(plan), edited = applyTextEdits(plan, input);
+  assert.deepEqual(plan, before); assert.deepEqual(edited.captions, plan.captions); assert.equal(edited.scenes[0].narration, plan.scenes[0].narration);
+  assert.deepEqual(edited.scenes[0].labels, ['Rain', 'River', 'Sea']); assert.equal(edited.scenes[0].layout, 'sequence'); assert.deepEqual(edited.scenes[1], plan.scenes[1]);
+  assert.throws(() => applyTextEdits(plan, parseTextEdits({expectedProjectRevision: 1, edits: {diagrams: [{sceneId: 'scene_8', labels: ['One', 'Two'], layout: 'cycle'}]}})));
+  const telugu = {...plan, language: 'te' as const};
+  assert.throws(() => applyTextEdits(telugu, input));
+  const te = applyTextEdits(telugu, parseTextEdits({expectedProjectRevision: 1, edits: {diagrams: [{sceneId: 'scene_1', labels: ['వర్షం', 'నది', '10%'], layout: 'cycle'}]}}));
+  assert.equal(te.scenes[0].labels[2], '10%');
+});
+test('diagram recovery preserves empty labels and exact pending saves, including legacy text-only records', () => {
+  const base: TextBase = {id: '10000000-0000-4000-8000-000000000001', projectRevision: 1, versionNumber: 1, language: 'en', scenes: structuredClone(plan.scenes)};
+  const scenes = structuredClone(base.scenes); scenes[0].labels!.push(''); scenes[0].layout = 'comparison';
+  const value: TextRecovery = {version: 1, scope: 'diagram-scope', base, scenes, pending: {key: '20000000-0000-4000-8000-000000000001', body: textChanges(base, scenes)}};
+  assert.deepEqual(recoverPlanText(JSON.stringify(value), value.scope), value);
+  assert.throws(() => parseTextEdits(value.pending!.body));
+  const legacyBase = {...base, scenes: base.scenes.map(({sceneId, heading, narration}) => ({sceneId, heading, narration}))};
+  const legacyScenes = structuredClone(legacyBase.scenes); legacyScenes[0].heading = 'Recovered heading';
+  const legacy: TextRecovery = {...value, base: legacyBase, scenes: legacyScenes, pending: {key: value.pending!.key, body: textChanges(legacyBase, legacyScenes)}};
+  assert.equal(legacy.pending!.body.edits.diagrams, undefined); assert.deepEqual(recoverPlanText(JSON.stringify(legacy), legacy.scope), legacy);
+  const bad = structuredClone(value); bad.scenes[0].labels = ['only one']; assert.equal(recoverPlanText(JSON.stringify(bad), value.scope), null);
+});
