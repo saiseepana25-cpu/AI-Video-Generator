@@ -23,9 +23,13 @@ export function canonicalJson(value: unknown): string {
 function object(value: unknown, keys: string[]) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length || keys.some(k => !Object.hasOwn(value, k))) return fail('Use the exact supported render contract.');
 }
-function text(value: unknown, max: number, language?: 'en' | 'te', numericLabel = false): string {
-  if (typeof value !== 'string' || value.length > max || !value.trim() || /[<>\u0000-\u001f\u007f\uD800-\uDFFF]/u.test(value)) return fail('Use bounded plain text without markup or control characters.');
-  const result = value.normalize('NFC').trim();
+function text(value: unknown, max: number, language?: 'en' | 'te', numericLabel = false, narrationWhitespace = false): string {
+  if (typeof value !== 'string') return fail('Use bounded plain text without markup or control characters.');
+  // Match the editor's narration normalization without relaxing single-line fields.
+  const normalized = (narrationWhitespace ? value.replace(/\r\n?/g, '\n') : value).normalize('NFC');
+  const result = normalized.trim();
+  const invalidCharacters = narrationWhitespace ? /[<>\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\uD800-\uDFFF]/u : /[<>\u0000-\u001f\u007f\uD800-\uDFFF]/u;
+  if (result.length > max || !result || invalidCharacters.test(normalized)) return fail('Use bounded plain text without markup or control characters.');
   if (language && ([...result].some(c => /[\p{L}\p{M}]/u.test(c) && !(language === 'te' ? /[\p{Script=Latin}\p{Script=Telugu}\p{Script=Inherited}]/u : /[\p{Script=Latin}\p{Script=Inherited}]/u).test(c)) || language === 'te' && (!numericLabel || /\p{L}/u.test(result)) && !/[\u0c00-\u0c7f]/u.test(result))) return fail('Keep spoken and visible video text in the selected language.');
   return result;
 }
@@ -56,14 +60,14 @@ export function buildRenderPlan(proposal: Plan, brief: Pick<ProjectDetail['brief
     object(scene, ['sceneId', 'heading', 'narration', 'labels', 'layout']);
     if (typeof scene.sceneId !== 'string' || !/^scene_[1-8]$/.test(scene.sceneId) || ids.has(scene.sceneId) || !['sequence', 'cycle', 'comparison'].includes(scene.layout)) return fail('Scene IDs and layouts must be unique and supported.');
     ids.add(scene.sceneId); array(scene.labels, 2, 5);
-    return {sceneId: scene.sceneId, heading: text(scene.heading, 140, proposal.language), narration: text(scene.narration, 1000, proposal.language), labels: scene.labels.map(label => text(label, 100, proposal.language, true)), layout: scene.layout};
+    return {sceneId: scene.sceneId, heading: text(scene.heading, 140, proposal.language), narration: text(scene.narration, 1000, proposal.language, false, true), labels: scene.labels.map(label => text(label, 100, proposal.language, true)), layout: scene.layout};
   });
   // Never silently fix wrong captions, missing coverage, duplicate IDs or anchors.
   if (proposal.captions.length !== scenes.length || new Set(proposal.captions.map(c => c.captionId)).size !== scenes.length || new Set(proposal.captions.map(c => c.sourceSegmentId)).size !== scenes.length) return fail('Every narration segment requires one unique matching caption.');
   for (const caption of proposal.captions) {
     object(caption, ['captionId', 'sourceSegmentId', 'text']);
     const scene = scenes.find(s => s.sceneId === caption.sourceSegmentId);
-    if (!scene || caption.captionId !== `caption_${scene.sceneId}` || text(caption.text, 1000, proposal.language) !== scene.narration) return fail('Captions must exactly match their selected-language narration.');
+    if (!scene || caption.captionId !== `caption_${scene.sceneId}` || text(caption.text, 1000, proposal.language, false, true) !== scene.narration) return fail('Captions must exactly match their selected-language narration.');
   }
   const referenceIds = new Set<string>();
   const suppliedReferences = brief.references.map(ref => {

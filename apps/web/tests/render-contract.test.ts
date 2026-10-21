@@ -3,6 +3,35 @@ import assert from 'node:assert/strict';
 import {buildRenderPlan, canonicalJson, generationHash, validateRenderPlan} from '../src/server/rendering/contract';
 import {loadFontPins} from '../src/server/rendering/assets';
 import {pins, renderFixture} from './fixtures/rendering';
+import {applyTextEdits, parseTextEdits} from '../src/server/planning/text-edits';
+
+test('editor-supported narration whitespace compiles with exact matching captions in both languages', () => {
+  for (const language of ['en', 'te'] as const) {
+    const {proposal, settings, brief} = renderFixture(language);
+    const input = language === 'en' ? 'Water rises.\r\n\tClouds form.\rRain falls.' : 'నీరు ఆవిరవుతుంది.\r\n\tమేఘాలు ఏర్పడతాయి.\rవర్షం కురుస్తుంది.';
+    const edited = applyTextEdits(proposal, parseTextEdits({expectedProjectRevision: 1, edits: {narration: [{segmentId: 'scene_1', text: input}]}}));
+    const plan = buildRenderPlan(edited, brief, settings, pins), expected = input.replace(/\r\n?/g, '\n');
+    assert.equal(plan.narration[0].text, expected); assert.equal(plan.captions[0].text, expected);
+    const unnormalized = structuredClone(edited); unnormalized.scenes[0].narration = unnormalized.captions[0].text = input;
+    assert.deepEqual(buildRenderPlan(unnormalized, brief, settings, pins), plan);
+    assert.deepEqual(validateRenderPlan(plan), plan); assert.match(generationHash(plan), /^[a-f0-9]{64}$/);
+    const mismatched = structuredClone(edited); mismatched.captions[0].text = expected.replace('\n\t', ' ');
+    assert.throws(() => buildRenderPlan(mismatched, brief, settings, pins), /exactly match/);
+  }
+});
+test('narration formatting does not relax heading/label restrictions or allow unsafe narration characters', () => {
+  const {proposal, settings, brief} = renderFixture();
+  for (const whitespace of ['\n', '\t', '\r\n', '\r']) {
+    const heading = structuredClone(proposal); heading.scenes[0].heading = `Water${whitespace}rises`;
+    assert.throws(() => buildRenderPlan(heading, brief, settings, pins));
+    const label = structuredClone(proposal); label.scenes[0].labels[0] = `Water${whitespace}rises`;
+    assert.throws(() => buildRenderPlan(label, brief, settings, pins));
+  }
+  for (const character of ['\u0000', '\u0008', '\u000b', '\u000c', '\u000e', '\u001f', '\u007f', '\ud800', '\udfff', '<', '>']) {
+    const invalid = structuredClone(proposal); invalid.scenes[0].narration = invalid.captions[0].text = `Water${character}rises.`;
+    assert.throws(() => buildRenderPlan(invalid, brief, settings, pins));
+  }
+});
 
 test('English and Telugu compile into exact same-language narration/captions, stable IDs and trusted phrase anchors', () => {
   for (const language of ['en', 'te'] as const) {

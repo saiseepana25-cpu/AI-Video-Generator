@@ -173,6 +173,16 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
     } finally {globalThis.fetch = original;}
     assert.deepEqual(await Promise.all(collections.map(c => db.collection(c).find().toArray())), before);
   });
+  test('saved multiline narration passes video input checks and preserves matching caption formatting', async () => {
+    await selectRenderVoice();
+    const input = 'Water rises.\r\n\tClouds form.', expected = 'Water rises.\n\tClouds form.';
+    const saved = await edits.edit(base._id, {expectedProjectRevision: 1, edits: {narration: [{segmentId: 'scene_1', text: input}]}}, randomUUID());
+    assert.equal(saved.plan.plan.scenes[0].narration, expected); assert.equal(saved.plan.plan.captions[0].text, expected);
+    const prepared = await renderInputs().prepare(saved.plan.id);
+    assert.deepEqual(prepared.issues, []); assert.equal(prepared.plan?.narration[0].text, expected); assert.equal(prepared.plan?.captions[0].text, expected);
+    assert.equal((await renderInputs().check(saved.plan.id)).status, 'compiled');
+    assert.equal(await db.collection('plan_versions').countDocuments(), 2); assert.equal(await db.collection('jobs').countDocuments(), 0);
+  });
   test('generation hash changes after direct edits; stale source/project/settings and active work cannot compile', async () => {
     await selectRenderVoice(); const service = renderInputs(), first = await service.check(base._id);
     const second = await edits.edit(base._id, body(), randomUUID()); const changed = await service.check(second.plan.id);
