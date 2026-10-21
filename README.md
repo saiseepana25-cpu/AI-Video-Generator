@@ -1,5 +1,24 @@
 # VideoCraft
 
+## Private media storage worker (F11a)
+
+Configure the six server-only R2 fields in `apps/web/.env.local` using the example. Endpoint: exactly `https://<account-id>.r2.cloudflarestorage.com`; region: `auto`; existing private bucket; bucket-scoped S3 credentials. Keep public access disabled. The SDK follows [Cloudflare's guide](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/), with [create-only conditional writes](https://developers.cloudflare.com/r2/api/s3/extensions/). File-size caps do not enforce the account's aggregate free allowance. No billing upgrade or paid fallback is enabled.
+
+Stop app/worker writes for migration, apply/check 011, then run storage alongside the generation worker in another terminal:
+
+```sh
+npm run web:db:migrate
+npm run web:db:check
+npm run web:storage -- worker
+# Safe aggregate status:
+npm run web:storage -- status
+# Operator commands for an existing local run:
+npm run web:storage -- store <run-id>
+npm run web:storage -- retry <failed-storage-run-id>
+```
+
+The worker discovers committed local output and revalidates media/captions/provenance, persisting MP4/SRT/input/timing/manifest bytes under fixed private keys. Keep local files until storage succeeds. Uploads are create-only and actual read-back SHA256 checked; partial/unknown writes reuse identical keys/bytes. Failed bundles require explicit storage-only retry, never new speech/video. Missing/corrupt local folders are skipped until correction plus explicit store or worker restart; changed destination settings cannot silently move earlier bundles. Ctrl+C finishes the bounded current step. Stored is an internal checkpoint: playback/downloads, ready-video pins and cleanup follow later. No signed URL/public access is created; evaluation publication restrictions remain.
+
 ## Dashboard generation worker (F09b/F10b)
 
 Install both dependency trees and configure Google/MongoDB/provider settings as described below. The worker uses `apps/web/.env.local` and reads the existing root Remotion license confirmation without printing credentials. Stop application/worker writes before applying migration 010, then use separate terminals from the repository root:

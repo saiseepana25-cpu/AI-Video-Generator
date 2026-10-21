@@ -84,6 +84,7 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
     await db.collection<Row>('schema_migrations').deleteOne({_id: '008_plan_history'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '009_generation_queue'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '010_generation_worker'});
+    await db.collection<Row>('schema_migrations').deleteOne({_id: '011_private_media_storage'});
     await db.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     for (const contract of editCollections) await db.command({collMod: contract.name, validator: contract.validator});
     await db.command({collMod: 'provider_controls', validator: providerCollections[0].validator});

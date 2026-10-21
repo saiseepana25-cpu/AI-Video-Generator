@@ -15,6 +15,9 @@ import {generationHash} from '../src/server/rendering/contract';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, testUserId, type Row} from './fixtures/database';
 import {providerEnv, providerFixture} from './fixtures/providers';
 import {pins, renderFixture} from './fixtures/rendering';
+import {StorageService} from '../src/server/storage/service';
+import {storageKinds, StorageFault, type StorageBundle, type StorageKind, type StorageObject} from '../src/server/storage/contracts';
+import {sha256, verifyObject} from '../src/server/storage/r2';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -34,7 +37,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_local_artifacts']) await db.collection(n).deleteMany({});
+    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_local_artifacts', 'generation_storage_bundles']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -188,5 +191,92 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   test('project deletion after claim prevents any subsequent external request and cannot resurrect the project', async () => {
     await approve(); engine.beforeObservation = async () => {await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: new Date()}});};
     await worker.tick(); assert.equal(engine.speechCalls, 0); assert.equal((await run())!.state, 'failed'); assert.ok((await db.collection<Row>('projects').findOne({_id: projectId}))!.deletedAt);
+  });
+  async function storageSetup() {
+    await approve(); await worker.tick(); const current = (await run())!;
+    const bytes = Object.fromEntries(storageKinds.map(k => [k, Buffer.from(k)])) as Record<StorageKind, Buffer>;
+    bytes.input = Buffer.from((await db.collection<Row>('approvals').findOne({_id: current.approvalId}))!.inputCanonical);
+    await db.collection<Row>('generation_local_artifacts').updateOne({_id: current.artifactId!}, {$set: {manifestHash: sha256(bytes.manifest)}});
+    const reader = {read: async () => bytes}, store = {configHash: 'a'.repeat(64), bucket: 'test-private', calls: 0, objects: new Map<string, Buffer>(), hook: undefined as undefined | (() => Promise<void>),
+      async ensure(object: StorageObject, data: Buffer) {this.calls++; verifyObject(object, data); await this.hook?.(); const old = this.objects.get(object.key); if (old) assert.deepEqual(old, data); else this.objects.set(object.key, data);}};
+    return {current, bytes, reader, store, storage: new StorageService(client, name, store, reader)};
+  }
+  test('private storage preparation is unique and persisted bundles are not ready/public video results', async () => {
+    const {storage, store, current} = await storageSetup();
+    await Promise.all([storage.prepare(current._id), storage.prepare(current._id)]);
+    assert.equal(await db.collection('generation_storage_bundles').countDocuments(), 1);
+    assert.equal(await storage.tick(), true); assert.equal(await storage.tick(), false);
+    const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!;
+    assert.equal(bundle.state, 'stored'); assert.equal(bundle.objects.length, 5); assert.equal(store.objects.size, 5); assert.equal(bundle.owner, null);
+    assert.equal((await run())!.state, 'rendered_local'); assert.equal((await service.job(current.jobId))!.result, null);
+    assert.equal(engine.speechCalls, 3); assert.equal(engine.renderCalls, 1);
+    assert.equal(await db.collection('activity_events').countDocuments({dedupeKey: `storage:${bundle._id}:stored`}), 1); await checkDatabase(db);
+  });
+  test('partial storage failure retries the exact keys/bytes without new speech/rendering', async () => {
+    const {storage, store, current} = await storageSetup(); const bundle = await storage.prepare(current._id);
+    store.hook = async () => {if (store.calls === 3) throw new Error('Private provider details');};
+    await assert.rejects(storage.tick(), /STORAGE_FAILED/); assert.equal(store.objects.size, 2);
+    assert.equal((await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!.state, 'failed'); assert.equal(await storage.tick(), false);
+    const holds = await provider(); store.hook = undefined; await storage.retry(current._id); await storage.tick();
+    const saved = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!;
+    assert.equal(saved.state, 'stored'); assert.deepEqual(saved.objects, bundle.objects); assert.equal(store.objects.size, 5); assert.deepEqual(await provider(), holds);
+    assert.equal(engine.speechCalls, 3); assert.equal(engine.renderCalls, 1);
+  });
+  test('storage lease takeover fences a late owner and safely reuses immutable object identities', async () => {
+    const {storage, store, reader, current} = await storageSetup(); await storage.prepare(current._id);
+    const started = deferred<void>(), release = deferred<void>(); let first = true;
+    store.hook = async () => {if (first) {first = false; started.resolve(); await release.promise;}};
+    const old = storage.tick(); const handled = old.catch(error => error); await started.promise;
+    try {
+      await db.collection<StorageBundle>('generation_storage_bundles').updateOne({runId: current._id}, {$set: {leaseUntil: new Date(0)}});
+      const replacement = new StorageService(client, name, store, reader); assert.equal(await replacement.tick(), true);
+      release.resolve(); assert.match((await handled).message, /STORAGE_OWNERSHIP_LOST/);
+      const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!;
+      assert.equal(bundle.state, 'stored'); assert.equal(bundle.epoch.toNumber(), 2); assert.equal(store.objects.size, 5);
+      assert.equal(await db.collection('activity_events').countDocuments({dedupeKey: `storage:${bundle._id}:stored`}), 1);
+    } finally {release.resolve(); await handled;}
+  });
+  test('unexpired storage ownership prevents a competing uploader', async () => {
+    const {storage, store, reader, current} = await storageSetup(); await storage.prepare(current._id);
+    const started = deferred<void>(), release = deferred<void>(); let first = true;
+    store.hook = async () => {if (first) {first = false; started.resolve(); await release.promise;}};
+    const old = storage.tick(); await started.promise;
+    try {assert.equal(await new StorageService(client, name, store, reader).tick(), false); assert.equal(await storage.tick(), false);}
+    finally {release.resolve(); await old;}
+    assert.equal(store.objects.size, 5);
+  });
+  test('project deletion during upload prevents stored finalization without rerendering or resurrection', async () => {
+    const {storage, store, current} = await storageSetup(); await storage.prepare(current._id);
+    store.hook = async () => {await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: new Date()}});};
+    await assert.rejects(storage.tick(), /STORAGE_SOURCE_UNAVAILABLE/);
+    assert.equal(store.objects.size, 1); assert.equal((await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!.state, 'failed');
+    assert.equal(await db.collection('activity_events').countDocuments({message: /private storage/}), 0); assert.equal(engine.renderCalls, 1);
+  });
+  test('changed local bytes cannot reuse a reserved object key', async () => {
+    const {storage, store, current, bytes} = await storageSetup(); await storage.prepare(current._id); bytes.srt = Buffer.from('changed captions');
+    await assert.rejects(storage.tick(), /STORAGE_BYTES_CHANGED/); assert.equal(store.calls, 0); assert.equal(engine.renderCalls, 1);
+  });
+  test('destination changes cannot migrate or retry a bundle into another bucket silently', async () => {
+    const {storage, store, reader, current} = await storageSetup(); await storage.prepare(current._id);
+    const changed = new StorageService(client, name, {...store, bucket: 'other', configHash: 'b'.repeat(64)}, reader);
+    assert.equal(await changed.tick(), false);
+    store.hook = async () => {throw new StorageFault('STORAGE_VERIFICATION_FAILED');}; await assert.rejects(storage.tick());
+    await assert.rejects(changed.retry(current._id), /STORAGE_SOURCE_CHANGED/); assert.equal(store.objects.size, 0);
+  });
+  test('missing or foreign local provenance refuses storage before object writes', async () => {
+    const {storage, store, current} = await storageSetup();
+    await db.collection<Row>('generation_local_artifacts').updateOne({_id: current.artifactId!}, {$set: {workspaceId: randomUUID()}});
+    await assert.rejects(storage.prepare(current._id), /STORAGE_SOURCE_UNAVAILABLE/); assert.equal(store.calls, 0); assert.equal(await db.collection('generation_storage_bundles').countDocuments(), 0);
+  });
+  test('discovery queues valid output, skips broken folders until explicit correction and excludes deleted projects', async () => {
+    const {storage, store, reader, current} = await storageSetup();
+    const read = reader.read; reader.read = async () => {throw new Error('missing local folder');};
+    await assert.rejects(storage.discover()); assert.equal(await storage.discover(), false); assert.equal(store.calls, 0);
+    reader.read = read; await storage.prepare(current._id); assert.equal(store.objects.size, 0);
+    await db.collection('generation_storage_bundles').deleteMany({});
+    await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: new Date()}});
+    const replacement = new StorageService(client, name, store, reader); assert.equal(await replacement.discover(), false);
+    await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: null}});
+    assert.equal(await replacement.discover(), true); assert.equal(await replacement.tick(), true); assert.equal(store.objects.size, 5);
   });
 });

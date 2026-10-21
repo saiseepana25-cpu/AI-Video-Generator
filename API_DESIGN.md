@@ -1,5 +1,11 @@
 # VideoCraft — V1 API Design
 
+## F11a deployed slice — private storage checkpoint (21 October 2026)
+
+No new public endpoint, signed URL, browser upload or media-result capability is introduced. Generation stays rendered_local with result:null even after its separate internal bundle is stored. F11b/c will resolve authorized playback/download DTOs and ready-video contracts. Browser clients receive no bucket keys/config hashes/local paths from this increment.
+
+Operator CLI: `web:storage -- worker|status|store <run-id>|retry <run-id>`. Status prints aggregate pending/uploading/failed/stored counts only. Worker discovery requires committed validated-local provenance; storage-only retries preserve exact identity/bytes and never call speech/rendering. Changed destinations cannot silently adopt earlier bundles. Safe failure codes omit SDK bodies/credentials. No HTTP unlock/retry endpoint or publishing right is added. Storage failure preserves the reviewed plan and cannot mark video ready.
+
 ## F09b/F10b deployed slice — leased local execution (21 October 2026)
 
 Generation jobs now expose `queued|running|cancellation_requested|cancelled|failed|rendered_local`, real started/finished timestamps and stages `plan_validation|speech|rendering` (progress remains null). Terminal errors are sanitized `{code,message,retryable:false}`. `rendered_local` means the local MP4 was validated and recorded; `result` remains null and there are no media URLs, ready-video/publication capabilities or local filesystem paths. F11 owns authorized media delivery. Project generation status polling refreshes the saved project revision when idle, preserving unsaved draft checks.
