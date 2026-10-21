@@ -4,19 +4,19 @@ import type {RenderCheck} from '@/server/rendering/service';
 import type {PlanPreview} from './plan-text-editor';
 import {Button} from './ui';
 
-export function PlanReadiness({plan, enabled, onPending}: {plan: PlanPreview; enabled: boolean; onPending: (value: boolean) => void}) {
+export function PlanReadiness({plan, enabled, onPending, onChecked}: {plan: PlanPreview; enabled: boolean; onPending: (value: boolean) => void; onChecked: (value: RenderCheck | null) => void}) {
   const [result, setResult] = useState<RenderCheck | null>(null), [message, setMessage] = useState(''), [checking, setChecking] = useState(false);
   const epoch = useRef(0), busy = useRef(false);
-  useEffect(() => {epoch.current++; setResult(null); setMessage('');}, [plan.id, plan.projectRevision]);
+  useEffect(() => {epoch.current++; setResult(null); setMessage(''); onChecked(null);}, [plan.id, plan.projectRevision, onChecked]);
   useEffect(() => {onPending(checking); return () => onPending(false);}, [checking, onPending]);
   async function check() {
-    if (busy.current) return; busy.current = true; const request = ++epoch.current; setChecking(true); setResult(null); setMessage('');
+    if (busy.current) return; busy.current = true; const request = ++epoch.current; setChecking(true); setResult(null); onChecked(null); setMessage('');
     try {
       const r = await fetch(`/api/v1/plans/${plan.id}/render-input`, {cache: 'no-store', signal: AbortSignal.timeout(15000)}), v = await r.json();
       if (request !== epoch.current) return;
       if (!r.ok) {setMessage(v.error?.message ?? 'Could not check this plan. Your saved work is unchanged.'); return;}
       if (v.data.planVersionId !== plan.id || v.data.projectRevision !== plan.projectRevision) {setMessage('The project changed. Review the latest saved plan and check again.'); return;}
-      setResult(v.data);
+      setResult(v.data); onChecked(v.data);
     } catch {if (request === epoch.current) setMessage('The check could not finish. Reconnect and try again; no video request was started.');}
     finally {busy.current = false; setChecking(false);}
   }

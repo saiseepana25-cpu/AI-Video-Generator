@@ -6,7 +6,7 @@ import {databaseClientOptions} from '../src/server/db/connection';
 import {assertDatabaseReady, checkDatabase, foundationChecksum, foundationMigration, projectMigration, migrateDatabase} from '../src/server/db/migrations';
 import {databaseTransaction} from '../src/server/db/transactions';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, type Row} from './fixtures/database';
-import {migrationCollection} from '../src/server/db/schemas';
+import {migrationCollection, ownedCollections} from '../src/server/db/schemas';
 
 // Intentionally does NOT load .env.local or use MONGODB_URI. Never drop an app DB.
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
@@ -238,6 +238,8 @@ describe('database foundation on a real local replica set', {concurrency: false}
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '006_ai_planning'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '007_plan_text_edits'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '008_plan_history'});
+    await partial.collection<Row>('schema_migrations').deleteOne({_id: '009_generation_queue'});
+    await partial.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '003_project_editing'});
     await partial.collection<Row>('schema_migrations').updateOne({_id: projectMigration.id}, {$set: {state: 'failed'}});
     await partial.collection('idempotency_records').drop();

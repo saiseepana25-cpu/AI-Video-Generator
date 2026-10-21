@@ -8,6 +8,7 @@ import {providerPolicyCollections} from './provider-policy-schemas';
 import {planningCollections} from './planning-schemas';
 import {planEditCollections} from './plan-edit-schemas';
 import {planHistoryCollections} from './plan-history-schemas';
+import {generationCollections} from './generation-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -34,6 +35,7 @@ const migrations = [
   {definition: {id: '006_ai_planning', description: 'Durable planning jobs, immutable proposals, worker ownership and free budget', contracts: planningCollections}, checksum: createHash('sha256').update(JSON.stringify(planningCollections)).digest('hex')},
   {definition: {id: '007_plan_text_edits', description: 'Immutable direct plan edits, provenance and command replay', contracts: planEditCollections}, checksum: createHash('sha256').update(JSON.stringify(planEditCollections)).digest('hex')},
   {definition: {id: '008_plan_history', description: 'Plan restore provenance and durable restore receipts', contracts: planHistoryCollections}, checksum: createHash('sha256').update(JSON.stringify(planHistoryCollections)).digest('hex')},
+  {definition: {id: '009_generation_queue', description: 'Exact-input approvals, generation command receipts and guarded queue admission', contracts: generationCollections}, checksum: createHash('sha256').update(JSON.stringify(generationCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

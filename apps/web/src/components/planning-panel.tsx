@@ -6,6 +6,8 @@ import {Button} from './ui';
 import {PlanTextEditor, type PlanPreview} from './plan-text-editor';
 import {PlanHistory} from './plan-history';
 import {PlanReadiness} from './plan-readiness';
+import {GenerationPanel} from './generation-panel';
+import type {RenderCheck} from '@/server/rendering/service';
 
 type Preview = PlanPreview;
 type Command = {key: string; url: string; body: {expectedProjectRevision?: number; expectedRevision?: number}};
@@ -18,6 +20,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
   const [editing, setEditing] = useState(false);
   const [historyPending, setHistoryPending] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [generationPending, setGenerationPending] = useState(true), [checked, setChecked] = useState<RenderCheck | null>(null);
   const busy = useRef(false), storageKey = `${scope}:planning-command:v1`;
   const load = useCallback(async () => {
     try {const r = await fetch(`/api/v1/projects/${projectId}/planning`, {cache: 'no-store', signal: AbortSignal.timeout(10000)});
@@ -38,7 +41,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
     } catch {setMessage('Planning request recovery is unavailable. Keep this tab open.');}
     setLoaded(true); void load();
   }, [storageKey, projectId, load]);
-  useEffect(() => {onPending(!!command || sending || editing || historyPending || checking);}, [command, sending, editing, historyPending, checking, onPending]);
+  useEffect(() => {onPending(!!command || sending || editing || historyPending || checking || generationPending);}, [command, sending, editing, historyPending, checking, generationPending, onPending]);
   useEffect(() => {const timer = setInterval(() => {void load();}, 3000); return () => clearInterval(timer);}, [load]);
   async function submit(next: Command) {
     if (busy.current) return; busy.current = true; setSending(true);
@@ -53,7 +56,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
     } catch {setMessage('Request outcome unconfirmed. Reconnect and check the same request.');}
     finally {busy.current = false; setSending(false);}
   }
-  const active = !!job && ['queued', 'running', 'cancellation_requested'].includes(job.state);
+  const active = generationPending || !!job && ['queued', 'running', 'cancellation_requested'].includes(job.state);
   const outdated = !!plan && (!plan.isCurrent || plan.sourceBriefRevision !== briefRevision);
   return <section className="planning-panel" aria-labelledby="planning-heading">
     <span className="section-index">THE PLAN</span><h2 id="planning-heading">Turn your idea into an explanation.</h2>
@@ -69,9 +72,10 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
     {plan && <div className="plan-preview" lang={plan.plan.language}><div className="editor-heading"><h3>{plan.plan.title}</h3><span className="neutral-badge">{outdated ? 'Outdated proposal' : `Plan version ${plan.versionNumber}`}</span></div><p>{plan.plan.learningObjective}</p>{outdated && <p className="form-error">This plan uses an earlier brief. Prepare a new plan to include your changes.</p>}
       <PlanTextEditor plan={plan} enabled={ready && !outdated && !active && !command && !sending && !historyPending && !checking} scope={scope} onEditing={setEditing} onSaved={async () => {await onProjectSaved(); await load();}}/>
       {!editing && plan.plan.scenes.map((scene, i) => <article className="plan-scene" key={scene.sceneId}><span className="section-index">SCENE {i + 1} · {scene.layout}</span><h4>{scene.heading}</h4><div className={`diagram-proposal diagram-${scene.layout}`} aria-label={`${scene.layout} diagram proposal`}>{scene.labels.map((label, n) => <span key={n}>{label}</span>)}</div><p>{scene.narration}</p><details><summary>Matching subtitles</summary><p>{plan.plan.captions.find(c => c.sourceSegmentId === scene.sceneId)?.text}</p></details></article>)}
-      <div className="recovery-panel">{plan.plan.reviewNotes.map(note => <p key={note}>{note}</p>)}<p>Approval and video generation are upcoming features.</p></div>
-      <PlanReadiness plan={plan} enabled={ready && !outdated && !active && !command && !sending && !editing && !historyPending} onPending={setChecking}/>
+      <div className="recovery-panel">{plan.plan.reviewNotes.map(note => <p key={note}>{note}</p>)}</div>
+      <PlanReadiness plan={plan} enabled={ready && !outdated && !active && !command && !sending && !editing && !historyPending} onPending={setChecking} onChecked={setChecked}/>
     </div>}
     <PlanHistory projectId={projectId} current={plan} scope={scope} enabled={ready && !active && !command && !sending && !editing && !checking} onPending={setHistoryPending} onSaved={async () => {await onProjectSaved(); await load();}}/>
+    <GenerationPanel projectId={projectId} revision={revision} scope={scope} checked={checked} enabled={ready && !command && !sending && !editing && !historyPending && !checking} onPending={setGenerationPending} onSaved={async () => {await onProjectSaved(); await load();}}/>
   </section>;
 }

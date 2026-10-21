@@ -12,6 +12,7 @@ import type {ProviderControl} from '../src/server/providers/contracts';
 import {providerCollections} from '../src/server/db/provider-schemas';
 import {editCollections} from '../src/server/db/edit-schemas';
 import {Long} from 'mongodb';
+import {ownedCollections} from '../src/server/db/schemas';
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Tests require isolated loopback MongoDB.');
 const client = new MongoClient(uri, databaseClientOptions), name = `videocraft_f06_test_${randomUUID().replaceAll('-', '')}`, db = client.db(name), collection = db.collection<ProviderControl>('provider_controls');
@@ -81,6 +82,8 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
     await db.collection<Row>('schema_migrations').deleteOne({_id: '006_ai_planning'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '007_plan_text_edits'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '008_plan_history'});
+    await db.collection<Row>('schema_migrations').deleteOne({_id: '009_generation_queue'});
+    await db.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     for (const contract of editCollections) await db.command({collMod: contract.name, validator: contract.validator});
     await db.command({collMod: 'provider_controls', validator: providerCollections[0].validator});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '005_provider_operator_policy'});

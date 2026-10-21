@@ -168,7 +168,7 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
       const first = await service.check(base._id), again = await service.check(base._id);
       assert.equal(first.status, 'compiled'); assert.equal(first.canGenerate, false); assert.match(first.generationInputHash!, /^[a-f0-9]{64}$/);
       assert.equal(first.generationInputHash, again.generationInputHash); assert.equal(first.summary?.sceneCount, 3);
-      assert.deepEqual(first.executionBlocks.map(b => b.code), ['GENERATION_NOT_IMPLEMENTED']);
+      assert.deepEqual(first.executionBlocks.map(b => b.code), ['GENERATION_WORKER_UNAVAILABLE']);
       assert.ok(!JSON.stringify(first).includes('Xb7hH8MSUJpSbSDYk0k2')); assert.ok(!JSON.stringify(first).includes(providerEnv.ELEVENLABS_API_KEY)); assert.equal(calls, 0);
     } finally {globalThis.fetch = original;}
     assert.deepEqual(await Promise.all(collections.map(c => db.collection(c).find().toArray())), before);
@@ -202,7 +202,7 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
       const result = await service.check(base._id); assert.equal(result.status, 'compiled'); assert.equal(result.generationInputHash, first.generationInputHash); assert.equal(result.executionBlocks[0].code, code);
     }
     await db.collection<Row>('provider_controls').replaceOne({_id: 'elevenlabs'}, {...providerFixture(), reservations: [{id: randomUUID(), units: 950, state: 'reserved', createdAt: new Date()}]});
-    assert.deepEqual((await service.check(base._id)).executionBlocks.map(b => b.code), ['GENERATION_NOT_IMPLEMENTED']); // Remaining is already net of held units.
+    assert.deepEqual((await service.check(base._id)).executionBlocks.map(b => b.code), ['GENERATION_WORKER_UNAVAILABLE']); // Remaining is already net of held units.
   });
   test('render preparation hides foreign/deleted plans, denies inactive members and sanitizes local asset failure', async () => {
     const foreign = new RenderInputService(client, name, {...context, workspaceId: randomUUID()}, providerEnv, async () => pins);

@@ -9,6 +9,7 @@ import {voiceCatalog} from '../providers/catalog';
 import type {Env, ProviderControl} from '../providers/contracts';
 import {buildRenderPlan, generationHash, RenderInputError, type FontPins} from './contract';
 import {loadFontPins} from './assets';
+import {compatibleWorker, readGenerationWorker, workerUnavailable} from '../generation/capability';
 
 export class RenderInputService {
   constructor(private client: MongoClient, private name: string, private context: ProjectContext, private env: Env, private assets: () => Promise<FontPins> = loadFontPins) {}
@@ -49,9 +50,11 @@ export class RenderInputService {
   }
   async check(id: string) {
     const result = await this.prepare(id), plan = result.plan;
+    const worker = plan ? await readGenerationWorker(this.client.db(this.name)) : null;
+    const executionBlocks = [...result.executionBlocks, ...(plan && compatibleWorker(worker, plan) ? [] : [workerUnavailable])];
     return {planVersionId: result.version._id, projectId: result.version.projectId, versionNumber: result.version.versionNumber.toNumber(), projectRevision: result.projectRevision,
-      status: plan ? 'compiled' : 'needs_changes', generationInputHash: result.generationInputHash, canGenerate: false,
-      issues: result.issues, executionBlocks: [...result.executionBlocks, {code: 'GENERATION_NOT_IMPLEMENTED', message: 'Approval, the generation queue and the selected-language renderer are the next steps.'}],
+      status: plan ? 'compiled' : 'needs_changes', generationInputHash: result.generationInputHash, canGenerate: !!plan && !executionBlocks.length,
+      issues: result.issues, executionBlocks,
       summary: plan ? {language: plan.language, captionLanguage: plan.settingsSnapshot.captionLanguage, targetSeconds: plan.targetSeconds,
         sceneCount: plan.scenes.length, segmentCount: plan.narration.length, templates: [...new Set(plan.scenes.map(s => s.templateId))],
         voice: {catalogId: plan.settingsSnapshot.voiceCatalogId, accentId: plan.settingsSnapshot.accentId, model: plan.settingsSnapshot.speech.model},

@@ -98,6 +98,7 @@ export class PlanningService {
         const project = await this.project(projectId, db, session);
         if (!project.revision.equals(Long.fromNumber(revision))) throw fail('STALE_REVISION', 409, 'Reload the latest saved brief before planning.');
         if (project.activePlanningJobId) throw fail('PLANNING_IN_PROGRESS', 409, 'A planning job is already active.');
+        if (project.latestRunId) throw fail('GENERATION_IN_PROGRESS', 409, 'Finish or cancel video generation before starting another plan.');
         const input = {brief: project.brief, settings: project.settings}; planningPrompt(input, action as Kind);
         await this.worker(db, session); await this.checkCapacity(db, session);
         row = {_id: id, schemaVersion: 1, workspaceId: this.context.workspaceId, projectId, userId: this.context.userId, kind: action as Kind,
@@ -112,6 +113,7 @@ export class PlanningService {
         const project = await this.project(row.projectId, db, session);
         if (!row.statusRevision.equals(Long.fromNumber(revision))) throw fail('STALE_REVISION', 409, 'Refresh the job before changing it.');
         if (action === 'retry') {
+          if (project.latestRunId) throw fail('GENERATION_IN_PROGRESS', 409, 'Finish or cancel video generation before retrying planning.');
           if (!jobView(row).allowedActions.includes('retry')) throw fail('RETRY_UNAVAILABLE', 409, 'This request cannot safely be retried.');
           const latest = await db.collection<Job>('jobs').find({workspaceId: row.workspaceId, projectId: row.projectId}, {session}).sort({createdAt: -1, _id: -1}).limit(1).next();
           if (!project.briefRevision.equals(row.sourceBriefRevision) || row.kind === 'plan' && project.planningRequestId !== row.requestId || latest?._id !== row._id || project.activePlanningJobId && project.activePlanningJobId !== row._id) throw fail('PLAN_OUTDATED', 409, 'The brief changed or a newer request exists. Prepare a new plan.');
