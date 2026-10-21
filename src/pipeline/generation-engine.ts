@@ -37,6 +37,7 @@ export class LiveGenerationEngine implements GenerationEngine {
       licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal});
     const id = path.basename(result.folder); requireProjectId(id);
     const manifest = await fs.readFile(path.join(result.folder, 'manifest.json'));
-    return {_id: id, manifestHash: sha(manifest), media: result.media, rendererBuildHash: result.rendererBuildHash};
+    if (sha(manifest) !== result.manifestHash) throw new GenerationFault('LOCAL_MANIFEST_CHANGED');
+    return {_id: id, manifestHash: result.manifestHash, media: result.media, rendererBuildHash: result.rendererBuildHash};
   }
 }

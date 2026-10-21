@@ -6,6 +6,7 @@ import type {Approval, GenerationRun, LocalArtifact} from '../generation/contrac
 import {canonicalJson, generationHash, validateRenderPlan} from '../rendering/contract';
 import {maxBundleBytes, storageFiles, storageKinds, StorageFault, type ArtifactReader, type ObjectStore, type StorageBundle, type StorageSource} from './contracts';
 import {sha256, verifyObject} from './r2';
+import {verifyCompletedMp4} from './provenance';
 
 export class StorageService {
   readonly owner = randomUUID(); private busy = false;
@@ -34,6 +35,7 @@ export class StorageService {
   async prepare(runId: string) {
     const existing = await this.db.collection<StorageBundle>('generation_storage_bundles').findOne({runId}); if (existing) return existing;
     const source = await this.source(this.db, runId), bytes = await this.reader.read(source), id = source.artifact._id;
+    verifyCompletedMp4(bytes, source);
     if (sha256(bytes.manifest) !== source.artifact.manifestHash || bytes.input.toString('utf8') !== source.approval.inputCanonical) throw new StorageFault('STORAGE_SOURCE_CHANGED');
     const prefix = `workspaces/${source.run.workspaceId}/projects/${source.run.projectId}/runs/${runId}/bundles/${id}`;
     const objects = storageKinds.map(kind => ({kind, key: `${prefix}/${storageFiles[kind].name}`, mime: storageFiles[kind].mime, size: bytes[kind].length, sha256: sha256(bytes[kind])}));
@@ -83,6 +85,7 @@ export class StorageService {
         $inc: {epoch: Long.ONE, revision: Long.ONE}}, {sort: {createdAt: 1, _id: 1}, returnDocument: 'after'});
       if (!bundle) return false;
       const source = await this.fence(bundle), bytes = await this.reader.read(source);
+      verifyCompletedMp4(bytes, source);
       if (sha256(bytes.manifest) !== bundle.manifestHash || bytes.input.toString('utf8') !== source.approval.inputCanonical) throw new StorageFault('STORAGE_SOURCE_CHANGED');
       if (bundle.objects.length !== storageKinds.length || new Set(bundle.objects.map(o => o.kind)).size !== storageKinds.length) throw new StorageFault('STORAGE_SOURCE_CHANGED');
       for (const object of bundle.objects) {

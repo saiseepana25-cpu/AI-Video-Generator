@@ -7,6 +7,7 @@ import {canonicalJson, generationHash, validateRenderPlan} from './render-contra
 import {selectedSrt} from './selected-timing.js';
 import {inspectVideo} from './probe.js';
 import type {SelectedCue} from './selected-types.js';
+import {verifyCompletedMp4} from '../../apps/web/src/server/storage/provenance';
 export class LocalArtifactReader implements ArtifactReader {
   constructor(private root: string, private inspect = inspectVideo) {}
   async read({run, artifact, approval}: StorageSource): Promise<Record<StorageKind, Buffer>> {
@@ -24,6 +25,7 @@ export class LocalArtifactReader implements ArtifactReader {
         while (offset < bytes[kind].length) {const n = await handle.read(bytes[kind], offset, bytes[kind].length - offset, offset); if (!n.bytesRead) throw new Error(); offset += n.bytesRead;}
       } finally {await handle.close();}
     }
+    verifyCompletedMp4(bytes, {run, artifact, approval});
     const manifest = JSON.parse(bytes.manifest.toString('utf8')), timing = JSON.parse(bytes.timing.toString('utf8'));
     const plan = validateRenderPlan(JSON.parse(bytes.input.toString('utf8')));
     if (sha256(bytes.manifest) !== artifact.manifestHash || canonicalJson(plan) !== approval.inputCanonical || generationHash(plan) !== run.inputHash
@@ -44,7 +46,7 @@ export class LocalArtifactReader implements ArtifactReader {
     });
     if (bytes.srt.toString('utf8') !== selectedSrt(cues)) throw new StorageFault('STORAGE_SOURCE_CHANGED');
     const media = await this.inspect(path.join(folder, 'video.mp4'), manifest.durationInFrames / 30, 1, true);
-    if (canonicalJson(media) !== canonicalJson(artifact.media) || sha256(await fs.readFile(path.join(folder, 'video.mp4'))) !== sha256(bytes.mp4)) throw new StorageFault('STORAGE_SOURCE_CHANGED');
+    if (canonicalJson(media) !== canonicalJson(artifact.media)) throw new StorageFault('STORAGE_SOURCE_CHANGED');
     return bytes;
   }
 }

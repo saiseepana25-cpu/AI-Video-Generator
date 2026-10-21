@@ -2,6 +2,8 @@
 
 ## Private media storage worker (F11a)
 
+New completed manifests pin MP4 SHA256, and their exact bytes are pinned by the generation artifact's manifestHash. Storage checks this chain before preparing/uploading a bundle, independently of media profile/duration/audio checks. Older manifests without a checksum stop with STORAGE_VIDEO_CHECKSUM_REQUIRED. Do not compute a checksum from today's file to rewrite an old completion; a newly reviewed generation is required. No silent legacy backfill or stored-object rewrite occurs.
+
 Configure the six server-only R2 fields in `apps/web/.env.local` using the example. Endpoint: exactly `https://<account-id>.r2.cloudflarestorage.com`; region: `auto`; existing private bucket; bucket-scoped S3 credentials. Keep public access disabled. The SDK follows [Cloudflare's guide](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-js-v3/), with [create-only conditional writes](https://developers.cloudflare.com/r2/api/s3/extensions/). File-size caps do not enforce the account's aggregate free allowance. No billing upgrade or paid fallback is enabled.
 
 Stop app/worker writes for migration, apply/check 011, then run storage alongside the generation worker in another terminal:

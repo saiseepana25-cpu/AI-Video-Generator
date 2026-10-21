@@ -195,6 +195,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   async function storageSetup() {
     await approve(); await worker.tick(); const current = (await run())!;
     const bytes = Object.fromEntries(storageKinds.map(k => [k, Buffer.from(k)])) as Record<StorageKind, Buffer>;
+    bytes.manifest = Buffer.from(JSON.stringify({mp4Sha256: sha256(bytes.mp4)}));
     bytes.input = Buffer.from((await db.collection<Row>('approvals').findOne({_id: current.approvalId}))!.inputCanonical);
     await db.collection<Row>('generation_local_artifacts').updateOne({_id: current.artifactId!}, {$set: {manifestHash: sha256(bytes.manifest)}});
     const reader = {read: async () => bytes}, store = {configHash: 'a'.repeat(64), bucket: 'test-private', calls: 0, objects: new Map<string, Buffer>(), hook: undefined as undefined | (() => Promise<void>),
@@ -255,6 +256,17 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   test('changed local bytes cannot reuse a reserved object key', async () => {
     const {storage, store, current, bytes} = await storageSetup(); await storage.prepare(current._id); bytes.srt = Buffer.from('changed captions');
     await assert.rejects(storage.tick(), /STORAGE_BYTES_CHANGED/); assert.equal(store.calls, 0); assert.equal(engine.renderCalls, 1);
+  });
+  test('completed MP4 checksum is required before bundle preparation even with a custom reader', async () => {
+    const {storage, store, current, bytes} = await storageSetup(); bytes.mp4 = Buffer.from('replaced video with identical metrics');
+    await assert.rejects(storage.prepare(current._id), /STORAGE_SOURCE_CHANGED/);
+    assert.equal(await db.collection('generation_storage_bundles').countDocuments(), 0); assert.equal(store.calls, 0);
+  });
+  test('checksumless legacy artifacts cannot be prepared or silently backfilled', async () => {
+    const {storage, store, current, bytes} = await storageSetup(); bytes.manifest = Buffer.from('{}');
+    await db.collection<Row>('generation_local_artifacts').updateOne({_id: current.artifactId!}, {$set: {manifestHash: sha256(bytes.manifest)}});
+    await assert.rejects(storage.prepare(current._id), /STORAGE_VIDEO_CHECKSUM_REQUIRED/);
+    assert.equal(await db.collection('generation_storage_bundles').countDocuments(), 0); assert.equal(store.calls, 0);
   });
   test('destination changes cannot migrate or retry a bundle into another bucket silently', async () => {
     const {storage, store, reader, current} = await storageSetup(); await storage.prepare(current._id);

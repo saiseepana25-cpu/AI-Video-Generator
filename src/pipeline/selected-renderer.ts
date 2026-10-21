@@ -1,7 +1,7 @@
 import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {existsSync} from 'node:fs';
+import {createReadStream, existsSync} from 'node:fs';
 import {bundle} from '@remotion/bundler';
 import {openBrowser, renderMedia, renderStill, selectComposition} from '@remotion/renderer';
 import {assembleSelected, selectedSrt} from './selected-timing.js';
@@ -11,6 +11,11 @@ import {encodeWav} from './wav.js';
 import {inspectVideo} from './probe.js';
 
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+async function fileHash(file: string) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
 const fontSources = {
   heading: 'apps/web/node_modules/@fontsource/sora/files/sora-latin-400-normal.woff2',
   body: 'apps/web/node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2',
@@ -68,15 +73,19 @@ export async function renderSelectedVideo(options: {root: string; outputRoot: st
         cancelSignal: cancellation.cancelSignal, logLevel: 'error', overwrite: false, onProgress: ({progress}) => options.onProgress?.(progress)});
     } finally {options.signal?.removeEventListener('abort', abort);}
     options.signal?.throwIfAborted();
-    stage = 'media_validation'; const media = await inspectVideo(path.join(folder, 'video.mp4'), timeline.durationInFrames / 30, 1, true);
+    stage = 'media_validation';
+    const videoFile = path.join(folder, 'video.mp4'), mp4Sha256 = await fileHash(videoFile);
+    const media = await inspectVideo(videoFile, timeline.durationInFrames / 30, 1, true);
     stage = 'stills';
     for (const [i, cue] of timeline.cues.entries()) {
       options.signal?.throwIfAborted();
       await renderStill({composition, serveUrl, inputProps, output: path.join(folder, `scene-${i + 1}.png`), frame: Math.min(cue.startFrame + 20, cue.speechEndFrame - 1), puppeteerInstance: browser, logLevel: 'error'});
     }
     options.signal?.throwIfAborted();
-    manifest.state = options.mode === 'offline-diagnostic' ? 'diagnostic_complete' : 'validated_local'; manifest.media = media;
-    await saveManifest(); return {folder, media, rendererBuildHash, inputHash: options.expectedHash, diagnostic: options.mode === 'offline-diagnostic'};
+    if (await fileHash(videoFile) !== mp4Sha256) throw new Error('Video bytes changed during validation.');
+    manifest.state = options.mode === 'offline-diagnostic' ? 'diagnostic_complete' : 'validated_local'; manifest.media = media; manifest.mp4Sha256 = mp4Sha256;
+    const manifestHash = sha(JSON.stringify(manifest, null, 2));
+    await saveManifest(); return {folder, media, rendererBuildHash, manifestHash, inputHash: options.expectedHash, diagnostic: options.mode === 'offline-diagnostic'};
   } catch (error) {
     manifest.state = options.signal?.aborted ? 'cancelled' : 'failed'; manifest.failedStage = stage;
     manifest.error = stage === 'layout' ? 'Local text/font layout did not finish. Shorten overflowing captions/headings/labels and verify installed fonts.' : `Local video ${stage} did not finish. No provider fallback was performed.`;
