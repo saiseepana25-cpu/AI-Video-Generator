@@ -25,6 +25,7 @@
     "plan": "tsx scripts/cli.ts plan",
     "demo": "tsx scripts/cli.ts demo",
     "render": "tsx scripts/cli.ts render",
+    "render:diagrams": "tsx scripts/render-diagrams.ts",
     "studio": "remotion studio src/video/index.tsx",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",

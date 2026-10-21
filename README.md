@@ -1,5 +1,20 @@
 # VideoCraft
 
+## Selected-language diagram renderer (F10a)
+
+The new local adapter renders the dashboard's strict `educational-diagrams-v1` input directly, with sequence/cycle/comparison motion, local pinned fonts, measured phrase audio, matching captions and MP4/media checks. It is separate from the older bilingual prototype below. Install both dependency trees (`npm ci` and `npm ci --prefix apps/web`) and keep `REMOTION_FREE_LICENSE_CONFIRMED=true` in the ignored root `.env.local` only after confirming eligibility.
+
+```sh
+npm run render:diagrams -- --diagnostic --language en
+npm run render:diagrams -- --diagnostic --language te
+```
+
+These commands use curated fixtures and **offline robotic eSpeak only**, with zero provider calls. Unique output folders under `output/selected-diagrams/` contain `video.mp4`, `captions.srt`, narration WAV, canonical input, measured timeline/layout, representative frames and a manifest. Scratch bundles/fonts are isolated per render under ignored `.cache/selected-renderer/`. No earlier video is overwritten. Failed/cancelled work retains its nonvalidated manifest for inspection; only `diagnostic_complete` indicates a completed diagnostic. No database, approval, worker registry or R2 write occurs.
+
+For a local resolved input file, add `--input path/to/input.json --hash <reviewed-sha256>` with its matching language. The hash and installed font bytes must match. Narration/caption/scene IDs and clip text are checked, and measured audio must fit the target (+3 seconds maximum) and 90-second cap. Caption text is wrapped into at most two font-measured readable lines; excess text or speed fails instead of being clipped. Short diagnostic scripts may include visual reading holds to reach their target; this is not a narrative-quality acceptance claim. Native Telugu wording/pronunciation still needs human review.
+
+This does **not** enable dashboard generation: the diagnostic voice deliberately fails the pinned neural-voice requirement. Actual worker ownership/leases, external speech-attempt recovery, accepted-job UI and R2 media remain later increments. The adapter's evaluation branch validates caller-supplied speech source pins; the future trusted worker must supply verified provider-attempt/artifact provenance, not merely user-provided metadata.
+
 F06 introduces the authenticated `/api/v1/voices` catalog, separate evaluation voice/accent choices and conservative free-provider checks. Put provider settings in ignored `apps/web/.env.local` (see its key-free example), then explicitly migrate the database. Catalog reads never generate audio; the separate operator `web:providers:probe -- en|te` command performs a fixed short free-only compatibility test. Native accent quality and publication rights are not inferred from model language support. Current evidence and limitations remain in Project Status.
 
 The Next.js dashboard now supports editing saved briefs and video options with autosave and conflict recovery (F05). Run the explicit database migration/check with app writes stopped before starting the upgraded dashboard. Local unsaved work can be restored in the same browser tab; closing the tab or clearing browser storage can remove it. Voice selection and AI planning are subsequent milestones. See [Project Status](PROJECT_STATUS.md) for measured verification and the remaining feature roadmap.

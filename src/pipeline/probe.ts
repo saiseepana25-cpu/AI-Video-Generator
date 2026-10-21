@@ -20,15 +20,16 @@ export async function binary(name: 'ffmpeg' | 'ffprobe'): Promise<string> {
   return path.join(dir, name + (process.platform === 'win32' ? '.exe' : ''));
 }
 
-export async function inspectVideo(file: string, expectedSeconds: number, scale: number) {
+export async function inspectVideo(file: string, expectedSeconds: number, scale: number, strictProfile = false) {
   const {stdout} = await run(await binary('ffprobe'), ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', file], {maxBuffer: 1024 * 1024, windowsHide: true});
-  const result = JSON.parse(stdout) as {streams: {codec_type: string; codec_name: string; width?: number; height?: number; sample_rate?: string; duration?: string}[]; format: {duration: string}};
+  const result = JSON.parse(stdout) as {streams: {codec_type: string; codec_name: string; width?: number; height?: number; sample_rate?: string; duration?: string; avg_frame_rate?: string; pix_fmt?: string}[]; format: {duration: string}};
   const video = result.streams.find((stream) => stream.codec_type === 'video');
   const audio = result.streams.find((stream) => stream.codec_type === 'audio');
   const duration = Number(result.format.duration);
   if (video?.codec_name !== 'h264' || audio?.codec_name !== 'aac') throw new Error('Export validation failed: H.264 + AAC are required');
   if (video.width !== Math.round(1080 * scale) || video.height !== Math.round(1920 * scale)) throw new Error('Export dimensions are incorrect');
   if (Math.abs(duration - expectedSeconds) > 0.2) throw new Error('Export duration differs from the approved timeline');
+  if (strictProfile && (video.avg_frame_rate !== '30/1' || video.pix_fmt !== 'yuv420p' || audio.sample_rate !== '48000' || !Number.isFinite(duration) || duration > 90.2)) throw new Error('Export does not match the pinned frame/audio/pixel profile.');
   // Remotion's minimal FFmpeg build omits the volumedetect filter. Decode actual
   // exported audio to PCM and measure RMS directly, without extra dependencies.
   const decodedFile = path.join(path.dirname(file), `.qa-${randomUUID()}.wav`);
