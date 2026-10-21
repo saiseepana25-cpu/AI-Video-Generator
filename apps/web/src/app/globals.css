@@ -355,3 +355,13 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
   .nav-link { min-width: 0; gap: 6px; padding: 10px 4px; font-size: 11px; }
   .nav-link svg { width: 16px; height: 16px; }
 }
+
+.plan-history { margin-top: 32px; border-top: 1px solid #343946; padding-top: 24px; overflow-wrap: anywhere; }
+.history-list { padding: 0; list-style: none; }
+.history-list li { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 20px 0; border-bottom: 1px solid #343946; }
+.history-list li > div { min-width: 0; }
+.history-list p { margin: 8px 0; }
+.history-list .button { flex-shrink: 0; }
+.history-preview { background: #1B1E27; border: 1px solid #7B8498; border-radius: 16px; padding: 24px; margin-top: 24px; line-height: 1.8; }
+.history-preview summary { cursor: pointer; min-height: 44px; color: #7EDDCF; }
+@media (max-width: 760px) { .history-list li { align-items: stretch; flex-direction: column; } .history-preview { padding: 16px; } .plan-history .editor-heading { flex-wrap: wrap; gap: 12px; } }

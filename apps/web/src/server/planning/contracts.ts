@@ -18,7 +18,7 @@ export type Job = {_id: string; schemaVersion: 1; workspaceId: string; projectId
 export type PlanVersion = {_id: string; schemaVersion: 1; workspaceId: string; projectId: string; versionNumber: Long;
   sourceBriefRevision: Long; sourcePlanningRequestId: string; inputHash: string; settingsSnapshot: ProjectSettings;
   plan: Plan; plannerModelId: string; promptContractVersion: 'educational-diagrams-v1'; createdAt: Date; createdBy: string;
-  source?: 'ai' | 'direct_edit'; parentPlanVersionId?: string | null; contentHash?: string};
+  source?: 'ai' | 'direct_edit'; parentPlanVersionId?: string | null; restoredFromPlanVersionId?: string | null; contentHash?: string};
 export type JobView = {id: string; projectId: string; kind: Kind; state: JobState; statusRevision: number; sourceBriefRevision: number;
   stage: 'planning'; progress: null; result: JobResult; error: SafeError | null; allowedActions: string[];
   createdAt: string; updatedAt: string; finishedAt: string | null};

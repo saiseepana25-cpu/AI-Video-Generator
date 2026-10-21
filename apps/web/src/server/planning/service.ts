@@ -10,6 +10,8 @@ import {jobView, type Job, type Kind, type PlanVersion} from './contracts';
 import {planningPrompt, revisionInput} from './validation';
 import {planningActivity} from './activity';
 import {ProviderStore} from '../providers/store';
+import {historyCursor, historyQuery, readHistoryCursor} from './history-cursor';
+import {isDeepStrictEqual} from 'node:util';
 
 export type Row = Document & {_id: string};
 const fail = (code: string, status: number, message: string) => new ProjectError(code, status, message);
@@ -39,9 +41,24 @@ export class PlanningService {
     const project = await this.project(row.projectId);
     const isCurrent = project.currentPlanVersionId === row._id && project.briefRevision.equals(row.sourceBriefRevision) && project.planningRequestId === row.sourcePlanningRequestId;
     return {id: row._id, projectId: row.projectId, versionNumber: row.versionNumber.toNumber(), projectRevision: project.revision.toNumber(), sourceBriefRevision: row.sourceBriefRevision.toNumber(),
+      currentPlanVersionId: project.currentPlanVersionId as string | null, restoredFromPlanVersionId: row.restoredFromPlanVersionId ?? null, createdAt: row.createdAt.toISOString(),
+      canRestore: !isCurrent && !project.activePlanningJobId && !project.latestRunId && project.briefRevision.equals(row.sourceBriefRevision) && isDeepStrictEqual(project.settings, row.settingsSnapshot),
       source: row.source ?? 'ai', parentPlanVersionId: row.parentPlanVersionId ?? null, contentHash: row.contentHash ?? null, canEdit: isCurrent && !project.activePlanningJobId && !project.latestRunId,
       plan: row.plan, settingsSnapshot: row.settingsSnapshot, inputHash: row.inputHash, isCurrent, canGenerate: false,
       blockedReasons: [{code: isCurrent ? 'APPROVAL_NOT_IMPLEMENTED' : 'PLAN_OUTDATED', message: isCurrent ? 'Plan approval and generation are upcoming features.' : 'The saved brief or proposal has changed. Review the latest plan.'}]};
+  }
+  async versions(id: string, query: URLSearchParams) {
+    await this.authorize(); requireProjectId(id); const options = historyQuery(query), project = await this.project(id);
+    const secret = this.env.AUTH_SECRET;
+    if (!secret) throw new Error('CONFIGURATION_UNAVAILABLE');
+    const before = options.cursor ? readHistoryCursor(options.cursor, this.context.workspaceId, id, options.limit, secret) : null;
+    const rows = await this.db.collection<PlanVersion>('plan_versions').find({workspaceId: this.context.workspaceId, projectId: id, ...(before ? {versionNumber: {$lt: Long.fromNumber(before)}} : {})})
+      .sort({versionNumber: -1}).limit(options.limit + 1).toArray();
+    const hasMore = rows.length > options.limit, page = rows.slice(0, options.limit);
+    return {items: page.map(row => ({id: row._id, versionNumber: row.versionNumber.toNumber(), title: row.plan.title, source: row.source ?? 'ai',
+      parentPlanVersionId: row.parentPlanVersionId ?? null, restoredFromPlanVersionId: row.restoredFromPlanVersionId ?? null, createdAt: row.createdAt.toISOString(),
+      isCurrent: row._id === project.currentPlanVersionId, sourceBriefRevision: row.sourceBriefRevision.toNumber(), approvalState: 'not_available' as const})),
+      page: {hasMore, nextCursor: hasMore ? historyCursor(this.context.workspaceId, id, options.limit, page.at(-1)!.versionNumber.toNumber(), secret) : null}};
   }
   async overview(id: string) {
     await this.authorize(); requireProjectId(id); const project = await this.project(id);

@@ -80,6 +80,7 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
     // Reproduce an installed 004 database without modifying its immutable manifest.
     await db.collection<Row>('schema_migrations').deleteOne({_id: '006_ai_planning'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '007_plan_text_edits'});
+    await db.collection<Row>('schema_migrations').deleteOne({_id: '008_plan_history'});
     for (const contract of editCollections) await db.command({collMod: contract.name, validator: contract.validator});
     await db.command({collMod: 'provider_controls', validator: providerCollections[0].validator});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '005_provider_operator_policy'});
