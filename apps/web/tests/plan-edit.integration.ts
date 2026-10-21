@@ -9,6 +9,10 @@ import {PlanningService, type Row} from '../src/server/planning/service';
 import {ProjectService} from '../src/server/projects/service';
 import type {PlanVersion} from '../src/server/planning/contracts';
 import {membershipFixture, workspaceFixture, testUserId, testWorkspaceId} from './fixtures/database';
+import {RenderInputService} from '../src/server/rendering/service';
+import {providerEnv, providerFixture} from './fixtures/providers';
+import {pins} from './fixtures/rendering';
+import {digest} from '../src/server/providers/config';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -18,18 +22,25 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
   let db: Db, edits: PlanEditService, projects: ProjectService, planning: PlanningService, base: PlanVersion;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const c of ['plan_versions', 'plan_edit_commands', 'plan_restore_commands', 'projects', 'workspaces', 'memberships', 'idempotency_records', 'activity_events']) await db.collection(c).deleteMany({});
+    for (const c of ['plan_versions', 'plan_edit_commands', 'plan_restore_commands', 'projects', 'workspaces', 'memberships', 'idempotency_records', 'activity_events', 'provider_controls']) await db.collection(c).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     edits = new PlanEditService(client, name, context); projects = new ProjectService(client, name, context, 'test-plan-secret'.repeat(4)); planning = new PlanningService(client, name, context, {AUTH_SECRET: 'test-plan-secret'.repeat(4)});
     const project = (await projects.create({idea: 'Explain water', settings: {language: 'en', targetSeconds: 30, voiceCatalogId: null, accentId: null, brandKitRevisionId: null, themeId: 'clean-educational-v1', captionStyleId: 'readable-default-v1'}}, randomUUID())).project;
     const id = randomUUID(), request = randomUUID();
-    base = {_id: id, schemaVersion: 1, workspaceId: testWorkspaceId, projectId: project.id, versionNumber: Long.ONE, sourceBriefRevision: Long.ONE, sourcePlanningRequestId: request, inputHash: 'a'.repeat(64), settingsSnapshot: project.settings,
+    base = {_id: id, schemaVersion: 1, workspaceId: testWorkspaceId, projectId: project.id, versionNumber: Long.ONE, sourceBriefRevision: Long.ONE, sourcePlanningRequestId: request, inputHash: digest(JSON.stringify({brief: project.brief, settings: project.settings})), settingsSnapshot: project.settings,
       plan: {schemaVersion: 2, title: 'Water', learningObjective: 'Explain water', language: 'en', targetSeconds: 30, scenes: [1, 2, 3].map(i => ({sceneId: `scene_${i}`, heading: 'Water', narration: 'Water moves.', labels: ['Water', 'Air'], layout: 'cycle'})), captions: [1, 2, 3].map(i => ({captionId: `caption_scene_${i}`, sourceSegmentId: `scene_${i}`, text: 'Water moves.'})), reviewNotes: []}, plannerModelId: 'test-model', promptContractVersion: 'educational-diagrams-v1', createdAt: new Date(), createdBy: testUserId};
     await db.collection<PlanVersion>('plan_versions').insertOne(base);
     await db.collection<Row>('projects').updateOne({_id: project.id}, {$set: {currentPlanVersionId: id, planningRequestId: request, nextPlanVersionNumber: Long.ONE}});
   });
   after(async () => {try {if (!/^videocraft_f08_test_[a-f0-9]{32}$/.test(name)) throw new Error('Unsafe cleanup'); await db.dropDatabase();} finally {await client.close();}});
   const body = () => ({expectedProjectRevision: 1, edits: {narration: [{segmentId: 'scene_1', text: 'Rain falls into rivers.'}], headings: [{sceneId: 'scene_1', text: 'Rainfall'}]}});
+  const renderInputs = () => new RenderInputService(client, name, context, providerEnv, async () => pins);
+  async function selectRenderVoice() {
+    const project = await projects.get(base.projectId), settings = {...project.settings, voiceCatalogId: 'alice-evaluation', accentId: 'source-voice'};
+    await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {settings}});
+    await db.collection<PlanVersion>('plan_versions').updateOne({_id: base._id}, {$set: {settingsSnapshot: settings, inputHash: digest(JSON.stringify({brief: project.brief, settings}))}});
+    await db.collection<Row>('provider_controls').insertOne(providerFixture());
+  }
   test('saves a new immutable version with matching captions, parent/hash, current pointer and actor/activity', async () => {
     const before = await db.collection<PlanVersion>('plan_versions').findOne({_id: base._id});
     const saved = await edits.edit(base._id, body(), randomUUID()); assert.equal(saved.plan.versionNumber, 2); assert.equal(saved.plan.projectRevision, 2);
@@ -144,5 +155,52 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
     const key = randomUUID(); await edits.restore(base._id, input, key);
     await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {deletedAt: new Date()}});
     await assert.rejects(edits.restore(base._id, input, key), /could not be found/);
+  });
+  test('render preparation requires explicit voice/accent, is read-only, leaks no provider IDs and makes no provider calls', async () => {
+    const service = renderInputs(), missing = await service.check(base._id);
+    assert.equal(missing.status, 'needs_changes'); assert.equal(missing.generationInputHash, null); assert.equal(missing.issues[0].code, 'VOICE_REQUIRED');
+    await selectRenderVoice();
+    const collections = ['projects', 'plan_versions', 'provider_controls', 'jobs', 'activity_events', 'plan_edit_commands', 'plan_restore_commands'];
+    const before = await Promise.all(collections.map(c => db.collection(c).find().toArray()));
+    const original = globalThis.fetch; let calls = 0;
+    globalThis.fetch = (async () => {calls++; throw new Error('No provider request is allowed.');}) as typeof fetch;
+    try {
+      const first = await service.check(base._id), again = await service.check(base._id);
+      assert.equal(first.status, 'compiled'); assert.equal(first.canGenerate, false); assert.match(first.generationInputHash!, /^[a-f0-9]{64}$/);
+      assert.equal(first.generationInputHash, again.generationInputHash); assert.equal(first.summary?.sceneCount, 3);
+      assert.deepEqual(first.executionBlocks.map(b => b.code), ['GENERATION_NOT_IMPLEMENTED']);
+      assert.ok(!JSON.stringify(first).includes('Xb7hH8MSUJpSbSDYk0k2')); assert.ok(!JSON.stringify(first).includes(providerEnv.ELEVENLABS_API_KEY)); assert.equal(calls, 0);
+    } finally {globalThis.fetch = original;}
+    assert.deepEqual(await Promise.all(collections.map(c => db.collection(c).find().toArray())), before);
+  });
+  test('generation hash changes after direct edits; stale source/project/settings and active work cannot compile', async () => {
+    await selectRenderVoice(); const service = renderInputs(), first = await service.check(base._id);
+    const second = await edits.edit(base._id, body(), randomUUID()); const changed = await service.check(second.plan.id);
+    assert.notEqual(changed.generationInputHash, first.generationInputHash);
+    await assert.rejects(service.check(base._id), /current plan/);
+    await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {activePlanningJobId: randomUUID()}});
+    await assert.rejects(service.check(second.plan.id), /active work/);
+    await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {activePlanningJobId: null, 'brief.idea': 'Undeclared source change'}});
+    await assert.rejects(service.check(second.plan.id), /source does not match/);
+    await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {'settings.targetSeconds': 60}});
+    await assert.rejects(service.check(second.plan.id), /current plan/);
+  });
+  test('provider disablement, expiry, uncertainty and insufficient net allowance block execution without changing content hash', async () => {
+    await selectRenderVoice(); const service = renderInputs(), first = await service.check(base._id);
+    for (const [patch, code] of [[{operatorDisabled: true}, 'PROVIDER_DISABLED'], [{expiresAt: new Date(0)}, 'CAPABILITY_STALE'], [{'allowance.observedRemaining': 1}, 'FREE_ALLOWANCE_INSUFFICIENT'], [{reservations: [{id: randomUUID(), units: 10, state: 'uncertain', createdAt: new Date()}]}, 'UNCERTAIN_PROVIDER_USAGE']] as const) {
+      await db.collection<Row>('provider_controls').replaceOne({_id: 'elevenlabs'}, providerFixture()); await db.collection<Row>('provider_controls').updateOne({_id: 'elevenlabs'}, {$set: patch});
+      const result = await service.check(base._id); assert.equal(result.status, 'compiled'); assert.equal(result.generationInputHash, first.generationInputHash); assert.equal(result.executionBlocks[0].code, code);
+    }
+    await db.collection<Row>('provider_controls').replaceOne({_id: 'elevenlabs'}, {...providerFixture(), reservations: [{id: randomUUID(), units: 950, state: 'reserved', createdAt: new Date()}]});
+    assert.deepEqual((await service.check(base._id)).executionBlocks.map(b => b.code), ['GENERATION_NOT_IMPLEMENTED']); // Remaining is already net of held units.
+  });
+  test('render preparation hides foreign/deleted plans, denies inactive members and sanitizes local asset failure', async () => {
+    const foreign = new RenderInputService(client, name, {...context, workspaceId: randomUUID()}, providerEnv, async () => pins);
+    await assert.rejects(foreign.check(base._id), /team access/);
+    const foreignId = randomUUID(); await db.collection<Row>('memberships').insertOne({...membershipFixture(), _id: randomUUID(), workspaceId: foreignId});
+    await assert.rejects(new RenderInputService(client, name, {...context, workspaceId: foreignId}, providerEnv, async () => pins).check(base._id), /could not be found/);
+    await selectRenderVoice();
+    await assert.rejects(new RenderInputService(client, name, context, providerEnv, async () => {throw new Error('private local path');}).check(base._id), error => !!error && typeof error === 'object' && 'code' in error && error.code === 'RENDER_ASSETS_UNAVAILABLE' && !String(error).includes('private local path'));
+    await db.collection<Row>('projects').updateOne({_id: base.projectId}, {$set: {deletedAt: new Date()}}); await assert.rejects(renderInputs().check(base._id), /could not be found/);
   });
 });

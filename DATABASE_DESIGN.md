@@ -1,5 +1,13 @@
 # VideoCraft — V1 Database Design
 
+## F08d deployed slice — read-only resolved input (21 October 2026)
+
+No migration or document mutation is needed. plan_versions continues to retain the immutable staged proposal, unresolved settings and original saved-input hash. A snapshot/majority read transaction checks membership, scoped plan/live project, current pointer/request/source-brief/settings, source fingerprint and active-work exclusion, and reads current speech metadata. The pure compiler resolves trusted templates, stable narration/caption/event coverage and fixed settings; installed font bytes supply SHA256 pins. Compilation and font I/O occur outside the DB transaction. A check does not insert approval/jobs/receipts, change revisions, reserve capacity, refresh providers or rewrite historical rows.
+
+The resolved selected-language object is tagged schemaVersion:2 AND contract:educational-diagrams-v1. Canonical SHA256 covers its content, voice/brand/font/output/template/compiler/timing/policy pins; credentials and mutable availability are excluded. This is separate from the existing original saved-input fingerprint and edit contentHash. F09 must persist the entire validated object/hash as immutable approval/run input, guarded by expected current plan, project revision and hash in the acceptance transaction. It must never reconstruct an already-approved run from later mutable settings/assets. Until F09, currentPlanInputHash remains null in project details and no generation capability is granted. Existing migrations 001–008/checksums remain unchanged.
+
+Preflight supports sequence/cycle/comparison diagrams, matching captions, Alice/source-voice evaluation delivery, default Midnight Frame colors/local font pins and 1080×1920/30fps H.264/yuv420p/AAC48k output. Actual timing/final frames, font-metric layout fitting, renderer implementation, approval/queue/reservations and output media validation remain owning F09/F10 features. Future brands/media/template families require explicit supported pins, not arbitrary JSON or network references. Provider state/usage checks remain advisory here; expired/operator-disabled/unresolved usage cannot be cleared by compiling a plan.
+
 ## F08c deployed slice — migration 008 (21 October 2026)
 
 Migration `008_plan_history` extends plan_versions with optional nullable UUID restoredFromPlanVersionId. Existing rows remain untouched; manifests 001–007 are unchanged. Restore records source:direct_edit, parentPlanVersionId=previous current version and restoredFromPlanVersionId=selected historical version. A subsequent ordinary edit clears restore provenance on its own new row while retaining its parent link. Old versions remain insert-only in the domain service.

@@ -570,6 +570,8 @@ Resolve current membership, project, video, and available asset; issue a purpose
 
 ### 11.1 Plan schema v2
 
+F08d implementation reconciliation (21 October 2026): `apps/web/src/server/rendering/contract.ts` implements a strict selected-language pre-audio contract tagged `contract:educational-diagrams-v1`, with a React-free bridge at `src/pipeline/render-contract.ts`. The stored F07 proposal remains a different staged shape. Current compilation supports only version-1 sequence/cycle/comparison diagram templates, exact same-language captions, phrase start/end anchors, explicit Alice/source-voice evaluation settings, pinned installed fonts/default colors and output/timing policies. GET render-input exposes an advisory safe check; generation remains disabled. Canonical generation hash covers the validated resolved snapshot and excludes keys/volatile availability. See API/DB F08d reconciliation for exact boundaries. F09 approval/queue persistence and F10 measured timing/renderer/metric layout fitting remain unimplemented; this is not a render or visual-quality acceptance result.
+
 Migrate the prototype's always-bilingual fixtures to a selected-language application contract. Preserve fixtures for diagnostics. Do not make users approve both languages when requesting only one.
 
 ```typescript
@@ -603,7 +605,7 @@ type ApprovedPlan = {
 };
 ```
 
-The types named `ValidatedTemplateProps`, `WordOccurrenceAnchor`, and `ValidatedAnimationAction` represent discriminated, application-owned schemas, not arbitrary JSON/code accepted from the model. `captionLanguage` is derived output metadata equal to `language`, never a second request choice. Schema v2 is proposed here, not an implemented export in the current repository.
+The types named `ValidatedTemplateProps`, `WordOccurrenceAnchor`, and `ValidatedAnimationAction` represent discriminated, application-owned schemas, not arbitrary JSON/code accepted from the model. `captionLanguage` is derived output metadata equal to `language`, never a second request choice. The F08d diagram subset is implemented as reconciled above; other families and verified word anchors remain proposed extensions.
 
 Application checks include unique/stable IDs, complete narration-to-scene/caption coverage, no missing anchor occurrence, supported templates, bounded scene counts/text/props, unit/chart consistency, readable labels, and no unapproved asset/network references. Begin with 3–10 scenes as an engineering bound; extend only when validated, not as another user-facing setting.
 
