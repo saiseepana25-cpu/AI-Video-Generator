@@ -10,6 +10,8 @@ export type VideoAsset = {_id: string; workspaceId: string; projectId: string; v
 export function videoView(video: ReadyVideo) {
   return {id: video._id, projectId: video.projectId, versionNumber: video.versionNumber.toNumber(), planVersionId: video.planVersionId, generationRunId: video.runId,
     language: video.language, captionLanguage: video.captionLanguage, narrator: video.narrator, usagePolicy: video.usagePolicy, media: {...video.media, fps: 30},
-    transcript: video.transcript, readyAt: video.readyAt.toISOString(), playbackUrl: `/api/v1/videos/${video._id}/playback`, capabilities: {playback: true, download: false, publish: false, publishBlockedReason: 'MEDIA_USAGE_RESTRICTED'}};
+    transcript: video.transcript, readyAt: video.readyAt.toISOString(), playbackUrl: `/api/v1/videos/${video._id}/playback`,
+    downloadUrls: {mp4: `/api/v1/videos/${video._id}/downloads/mp4`, srt: `/api/v1/videos/${video._id}/downloads/srt`},
+    capabilities: {playback: true, download: true, publish: false, publishBlockedReason: 'MEDIA_USAGE_RESTRICTED'}};
 }
 export type VideoView = ReturnType<typeof videoView>;

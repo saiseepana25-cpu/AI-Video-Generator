@@ -1,5 +1,9 @@
 # VideoCraft — V1 Database Design
 
+## F11c deployed slice — download reads (21 October 2026)
+
+No schema/index/migration change. Downloads reuse migration 012's immutable ready video and owned MP4/SRT asset pins plus the stored bundle's checksum descriptors. The chosen role must match its exact scoped key, destination and available reference; membership/project and referenceRevision are reread after verified remote retrieval. SRT unavailability does not substitute the MP4 or another subtitle asset. No download counters, leases, reservations, mutation, publication rights or automatic regeneration are introduced.
+
 ## F11b deployed slice — migration 012 (21 October 2026)
 
 `012_ready_video_playback` adds ready_videos and video_assets; 001–011 manifests remain unchanged. Ready videos have immutable UUID workspace/project/run/approval/plan/bundle IDs, input/manifest/MP4/build/config hashes, bucket, Long versionNumber, sourceRunCreatedAt/readyAt, matching language/captionLanguage, evaluation narrator/policy, five role->asset UUIDs, validated media and bounded matching transcript. Unique ready_video_run_v1(runId), ready_video_bundle_v1(bundleId), ready_video_version_v1(workspaceId,projectId,versionNumber). Assets hold scoped UUID video/bundle ownership, immutable destination/object descriptor, lifecycleState available|unavailable|deleting|deleted, Long referenceRevision, refCount:1 and createdAt. Unique video_asset_role_v1(videoId,object.kind) and video_asset_object_v1(object.key,configHash). Each asset is owned by one video; sharing/cleanup requires later work honoring these references/lifecycle guards. Validators enforce shapes/counters/indexes; service enforces relationships/hash/language/role invariants.

@@ -6,6 +6,25 @@ export function VideoPlayer({projectId}: {projectId: string}) {
   const [video, setVideo] = useState<VideoView | null>(null), [loaded, setLoaded] = useState(false), [error, setError] = useState(''), [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0); const element = useRef<HTMLVideoElement>(null), position = useRef(0), currentId = useRef<string | null>(null);
   const requestSequence = useRef(0);
+  const [downloading, setDownloading] = useState(''), [downloadError, setDownloadError] = useState('');
+  const downloadController = useRef<AbortController | null>(null);
+  useEffect(() => () => downloadController.current?.abort(), []);
+  async function download(kind: 'mp4'|'srt') {
+    if (!video || downloadController.current) return;
+    const controller = new AbortController(); downloadController.current = controller;
+    setDownloading(kind); setDownloadError('');
+    try {
+      const response = await fetch(video.downloadUrls[kind], {cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)])});
+      if (!response.ok) throw new Error();
+      const blob = await response.blob(); if (controller.signal.aborted) return;
+      const url = URL.createObjectURL(blob), anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `videocraft-v${video.versionNumber}-${video.language}.${kind}`;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+      // Leave time for the browser to start consuming the object URL.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {if (!controller.signal.aborted) setDownloadError('Download could not complete. Reconnect or sign in again, then try the download again.');}
+    finally {downloadController.current = null; setDownloading('');}
+  }
   const refresh = useCallback(async () => {
     const sequence = ++requestSequence.current;
     try {const response = await fetch(`/api/v1/projects/${projectId}/videos/latest`, {cache: 'no-store', signal: AbortSignal.timeout(10000)});
@@ -25,6 +44,11 @@ export function VideoPlayer({projectId}: {projectId: string}) {
         onLoadedMetadata={() => {if (element.current && position.current > 0) element.current.currentTime = Math.min(position.current, element.current.duration);}}
         onError={() => setFailed(true)}/>
       <p className="muted-copy">Internal evaluation only · Review facts and pronunciation before use.</p>
+      {video.capabilities.download && <div className="video-downloads" aria-label="Download finished video">
+        <Button variant="secondary" disabled={!!downloading} onClick={() => void download('mp4')}>{downloading === 'mp4' ? 'Preparing MP4…' : 'Download MP4'}</Button>
+        <Button variant="secondary" disabled={!!downloading} onClick={() => void download('srt')}>{downloading === 'srt' ? 'Preparing subtitles…' : 'Download subtitles (.srt)'}</Button>
+      </div>}
+      {downloadError && <p role="alert">{downloadError}</p>}
       {failed && <div role="alert"><p>Playback could not load. Refresh access and try again; your video is retained.</p><Button variant="secondary" onClick={async () => {await refresh(); setFailed(false); setRetry(v => v + 1);}}>Retry playback</Button></div>}
       <details><summary>Matching transcript</summary>{video.transcript.map(segment => <p key={segment.segmentId}>{segment.text}</p>)}</details>
     </>}

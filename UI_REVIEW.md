@@ -118,3 +118,4 @@ F04 implementation reconciliation: UI-03/04 now show real persisted draft cards,
 - Use the PRD/API/DB as the authority for incidental generated labels (such as ready versus published, voice availability, deletion effects and scheduling delays). Fix a conflicting mockup rather than silently expanding the backend contract.
 
 No frontend application pages, database migrations, deployments or live provider integrations were implemented in this design pass.
+F11c: the same finished-video panel adds explicit MP4 and matching-language SRT download buttons beside its evaluation notice. Preparing state prevents duplicate clicks, failures stay inline with explicit retry, and wrapping controls preserve the Midnight Frame layout. No publication action or translated-caption option is added. Ready-state browser downloads on actual generated media remain acceptance work; fixture access/checksum tests do not establish that live flow.

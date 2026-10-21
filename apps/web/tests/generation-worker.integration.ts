@@ -219,7 +219,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal(bundle.state, 'stored'); assert.equal(bundle.objects.length, 5); assert.equal(store.objects.size, 5); assert.equal(bundle.owner, null);
     assert.equal((await run())!.state, 'rendered_local'); assert.equal((await service.job(current.jobId))!.result, null);
     const latest = await new VideoService(client, name, context, store).latest(projectId);
-    assert.equal(latest.video!.id, bundle._id); assert.equal(latest.video!.capabilities.publish, false); assert.equal(latest.video!.capabilities.download, false);
+    assert.equal(latest.video!.id, bundle._id); assert.equal(latest.video!.capabilities.publish, false); assert.equal(latest.video!.capabilities.download, true);
     assert.equal(await db.collection('video_assets').countDocuments({videoId: bundle._id, refCount: 1}), 5);
     assert.equal(engine.speechCalls, 3); assert.equal(engine.renderCalls, 1);
     assert.equal(await db.collection('activity_events').countDocuments({dedupeKey: `storage:${bundle._id}:stored`}), 1); await checkDatabase(db);
@@ -310,6 +310,51 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal((await videos.playback(view.id, null, true)).body, null);
     await assert.rejects(videos.playback(view.id, 'bytes=999-'), (e: unknown) => !!e && typeof e === 'object' && 'status' in e && e.status === 416);
     assert.equal(JSON.stringify(view).includes('workspaces/'), false); assert.equal(JSON.stringify(view).includes(store.configHash), false);
+  });
+  test('downloads return exact MP4 and matching UTF-8 SRT with safe attachment headers, ranges and HEAD', async () => {
+    const {storage, store, current, bytes} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client, name, context, store), view = (await videos.latest(projectId)).video!;
+    assert.equal(view.capabilities.download, true); assert.equal(view.capabilities.publish, false);
+    for (const kind of ['mp4','srt'] as const) {
+      assert.equal(view.downloadUrls[kind], `/api/v1/videos/${view.id}/downloads/${kind}`);
+      const result = await videos.download(view.id, kind, null);
+      assert.deepEqual(Buffer.from(result.body!), bytes[kind]); assert.equal(result.status, 200);
+      assert.equal(result.headers['Content-Disposition'], `attachment; filename="videocraft-v1-${view.language}.${kind}"`);
+      assert.equal(result.headers['Content-Length'], String(bytes[kind].length));
+      assert.equal(result.headers['Cache-Control'], 'private, no-store'); assert.equal(result.headers.Vary, 'Cookie');
+      assert.equal(result.headers['X-Content-Type-Options'], 'nosniff');
+      assert.equal(result.headers['Content-Type'], kind === 'mp4' ? 'video/mp4' : 'application/x-subrip; charset=utf-8');
+      assert.equal((await videos.download(view.id, kind, null, true)).body, null);
+      const part = await videos.download(view.id, kind, 'bytes=0-1'); assert.equal(part.status, 206); assert.deepEqual(Buffer.from(part.body!), bytes[kind].subarray(0,2));
+      await assert.rejects(videos.download(view.id, kind, 'bytes=0-1,3-4'), (e: unknown) => e instanceof Error && 'status' in e && e.status === 416);
+    }
+    for (const kind of ['input','manifest','timing','../srt','']) await assert.rejects(videos.download(view.id,kind,null), /could not be found/);
+  });
+  test('downloads reject corrupt or unavailable subtitle assets independently of playable MP4', async () => {
+    const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client,name,context,store), id = (await videos.latest(projectId)).video!.id;
+    const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!, key = bundle.objects.find(o => o.kind === 'srt')!.key;
+    const original = store.objects.get(key)!; store.objects.set(key, Buffer.from('substituted captions'));
+    await assert.rejects(videos.download(id,'srt',null), /temporarily unavailable/); store.objects.set(key,original);
+    await db.collection<Row>('video_assets').updateOne({videoId:id,'object.kind':'srt'},{$set:{lifecycleState:'deleting'}});
+    await assert.rejects(videos.download(id,'srt',null), /temporarily unavailable/);
+    assert.equal((await videos.download(id,'mp4',null)).status,200);
+  });
+  test('downloads recheck subtitle pin revision after retrieval and deny changed access', async () => {
+    const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client,name,context,store), id = (await videos.latest(projectId)).video!.id, read = store.read;
+    store.read = async function(object) {const bytes = await read.call(this,object); await db.collection<Row>('video_assets').updateOne({videoId:id,'object.kind':'srt'},{$inc:{referenceRevision:Long.ONE}}); return bytes;};
+    await assert.rejects(videos.download(id,'srt',null), /temporarily unavailable/);
+    store.read = async function(object) {const bytes = await read.call(this,object); await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'disabled'}}); return bytes;};
+    await assert.rejects(videos.download(id,'mp4',null), /team access/);
+  });
+  test('downloads refuse foreign workspace, deleted project and changed destination', async () => {
+    const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client,name,context,store), id = (await videos.latest(projectId)).video!.id;
+    await assert.rejects(new VideoService(client,name,{...context,workspaceId:randomUUID()},store).download(id,'srt',null));
+    await assert.rejects(new VideoService(client,name,context,{...store,configHash:'b'.repeat(64)}).download(id,'srt',null), /temporarily unavailable/);
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{deletedAt:new Date()}});
+    await assert.rejects(videos.download(id,'mp4',null), /could not be found/);
   });
   test('foreign scope, inactive membership and deleted projects cannot resolve or play a video', async () => {
     const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();

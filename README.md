@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Private downloads (F11c)
+
+The finished-video panel offers Download MP4 and Download subtitles (.srt) for ready output. Files retain the reviewed version/language; English uses English SRT and Telugu uses Telugu SRT. Both remain internal evaluation media, not authorized for publishing. Failed downloads show an inline message and can be explicitly retried without regenerating speech/video.
+
+GET/HEAD `/api/v1/videos/<video-id>/downloads/mp4` or `/downloads/srt` requires the signed-in active team member and a live owned project. Responses use safe attachment filenames, private/no-store, checksum verification and access rechecks. Single GET ranges are supported; HEAD ignores Range and has no body. Unsupported roles and arbitrary keys are refused. As with playback, the full bounded object is verified in memory for every request; assess memory/hosting limits before deployment. No new migration or credentials are required beyond F11b.
+
 ## Private playback (F11b)
 
 With app/worker writes stopped, apply/check migration 012, build/start the dashboard, then restart the storage worker in another terminal:
