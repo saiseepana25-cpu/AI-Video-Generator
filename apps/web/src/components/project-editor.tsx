@@ -1,11 +1,11 @@
 'use client';
+import {VideoPlayer} from './video-player';
 
 import {useEffect, useRef, useState} from 'react';
 import Link from 'next/link';
 import type {ProjectDetail} from '@/server/projects/contracts';
 import {acknowledge, changes, editable, readRecovery, recoveryKey, sameDraft, type Draft, type PendingEdit, type Recovery} from '@/lib/project-draft';
 import {Button, Panel} from './ui';
-import {DraftArtwork} from './project-library';
 import {CopyDraft} from './copy-draft';
 import {VoiceControls} from './voice-controls';
 import {PlanningPanel} from './planning-panel';
@@ -122,6 +122,6 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
           update({...current.current, draft, pending: command, mode: 'ready', message: ''});
         }}/>
     </Panel>
-    <aside className="project-side"><Panel className="project-visual"><DraftArtwork large/><h3>From idea to understanding.</h3><p>Your visual explanation will take shape here.</p></Panel><Panel className="project-settings"><h2>Video details</h2><dl className="project-facts"><div><dt>Language & subtitles</dt><dd>{settings.language === 'te' ? 'తెలుగు · Telugu' : 'English'}</dd></div><div><dt>Target length</dt><dd>{settings.targetSeconds} seconds</dd></div><div><dt>Saved revision</dt><dd>{state.base.revision}</dd></div></dl><p className="muted-copy">Clean educational visuals · Readable captions</p>{(dirty || state.pending || storageWarning) && <CopyDraft text={JSON.stringify(state.draft, null, 2)}/>}</Panel></aside>
+    <aside className="project-side"><VideoPlayer key={project.id} projectId={project.id}/><Panel className="project-settings"><h2>Video details</h2><dl className="project-facts"><div><dt>Language & subtitles</dt><dd>{settings.language === 'te' ? 'తెలుగు · Telugu' : 'English'}</dd></div><div><dt>Target length</dt><dd>{settings.targetSeconds} seconds</dd></div><div><dt>Saved revision</dt><dd>{state.base.revision}</dd></div></dl><p className="muted-copy">Clean educational visuals · Readable captions</p>{(dirty || state.pending || storageWarning) && <CopyDraft text={JSON.stringify(state.draft, null, 2)}/>}</Panel></aside>
   </div>;
 }

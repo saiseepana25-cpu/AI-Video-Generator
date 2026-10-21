@@ -1,5 +1,22 @@
 # VideoCraft
 
+## Private playback (F11b)
+
+With app/worker writes stopped, apply/check migration 012, build/start the dashboard, then restart the storage worker in another terminal:
+
+```sh
+npm run web:db:migrate
+npm run web:db:check
+npm run web:build
+npm run web:start
+# Separate terminal:
+npm run web:storage -- worker
+# Reconcile one already-stored, checksum-protected run without local files:
+npm run web:storage -- promote <run-id>
+```
+
+The same-page finished-video panel polls for actual ready output and provides native controls, matching transcript and explicit retry with seek-position retention. New storage commits ready metadata/owned asset pins atomically; older late completions cannot replace newer ready output. Loading/empty/error states do not fake finished videos. Each same-origin media request rechecks session/team/project/asset ownership and verifies actual MP4 bytes. No bearer URL/public R2 access or publication permission is created. Current playback rereads the whole bounded MP4 (<=128 MiB) for each request, including seeks/HEAD; hosted memory/response limits need validation before deployment. Downloads remain F11c. Checksumless legacy output cannot be promoted by inventing a hash. Dedicated latest-video lookup drives the player; legacy project-summary placeholders are unchanged.
+
 ## Private media storage worker (F11a)
 
 New completed manifests pin MP4 SHA256, and their exact bytes are pinned by the generation artifact's manifestHash. Storage checks this chain before preparing/uploading a bundle, independently of media profile/duration/audio checks. Older manifests without a checksum stop with STORAGE_VIDEO_CHECKSUM_REQUIRED. Do not compute a checksum from today's file to rewrite an old completion; a newly reviewed generation is required. No silent legacy backfill or stored-object rewrite occurs.

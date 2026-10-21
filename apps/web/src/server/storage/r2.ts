@@ -30,6 +30,10 @@ export class R2ObjectStore implements ObjectStore {
     // cannot prove an earlier PUT failed; late writes still carry identical bytes.
     try {await this.client.send(new PutObjectCommand({Bucket: this.bucket, Key: object.key, Body: bytes, ContentLength: bytes.length, ContentType: object.mime,
       IfNoneMatch: '*', Metadata: {sha256: object.sha256}}), {abortSignal: AbortSignal.timeout(60000)});} catch { /* Reconcile by actual read-back, never ETag alone. */ }
+    await this.read(object);
+  }
+  async read(object: StorageObject): Promise<Buffer> {
+    if (!storageFiles[object.kind] || object.size < 1 || object.size > storageFiles[object.kind].max || object.mime !== storageFiles[object.kind].mime) throw new StorageFault('STORAGE_BYTES_CHANGED');
     try {
       const signal = AbortSignal.timeout(60000);
       const result = await this.client.send(new GetObjectCommand({Bucket: this.bucket, Key: object.key}), {abortSignal: signal});
@@ -41,7 +45,7 @@ export class R2ObjectStore implements ObjectStore {
         if (signal.aborted) throw new Error();
         for await (const chunk of stream as AsyncIterable<Uint8Array>) {length += chunk.length; if (length > object.size) {stream.destroy(); throw new Error();} chunks.push(Buffer.from(chunk));}
       } finally {signal.removeEventListener('abort', abort); if (!stream.readableEnded) stream.destroy();}
-      if (length !== object.size || sha256(Buffer.concat(chunks)) !== object.sha256) throw new Error();
+      const bytes = Buffer.concat(chunks); verifyObject(object, bytes); return bytes;
     } catch {throw new StorageFault('STORAGE_VERIFICATION_FAILED');}
   }
 }

@@ -18,6 +18,8 @@ import {pins, renderFixture} from './fixtures/rendering';
 import {StorageService} from '../src/server/storage/service';
 import {storageKinds, StorageFault, type StorageBundle, type StorageKind, type StorageObject} from '../src/server/storage/contracts';
 import {sha256, verifyObject} from '../src/server/storage/r2';
+import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
+import type {ReadyVideo} from '../src/server/videos/contracts';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -37,7 +39,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_local_artifacts', 'generation_storage_bundles']) await db.collection(n).deleteMany({});
+    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -195,14 +197,20 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   async function storageSetup() {
     await approve(); await worker.tick(); const current = (await run())!;
     const bytes = Object.fromEntries(storageKinds.map(k => [k, Buffer.from(k)])) as Record<StorageKind, Buffer>;
-    bytes.manifest = Buffer.from(JSON.stringify({mp4Sha256: sha256(bytes.mp4)}));
     bytes.input = Buffer.from((await db.collection<Row>('approvals').findOne({_id: current.approvalId}))!.inputCanonical);
+    const plan = JSON.parse(bytes.input.toString()), media = (await db.collection<Row>('generation_local_artifacts').findOne({_id: current.artifactId!}))!.media;
+    const cues = plan.narration.map((n: {text: string; segmentId: string}, i: number) => ({segmentId: n.segmentId, sceneId: plan.scenes[i].sceneId, text: n.text, startFrame: i * 300, speechEndFrame: i * 300 + 250, endFrame: (i + 1) * 300}));
+    bytes.manifest = Buffer.from(JSON.stringify({mp4Sha256: sha256(bytes.mp4), state: 'validated_local', mode: 'elevenlabs-evaluation', diagnostic: false, voicePinSatisfied: true, publicationAllowed: false,
+      inputHash: current.inputHash, rendererBuildHash: current.rendererBuildHash, language: plan.language, fps: 30, durationInFrames: 900, audioHash: 'a'.repeat(64), media}));
+    bytes.timing = Buffer.from(JSON.stringify({cues, audioHash: 'a'.repeat(64), layout: {scenes: cues.map((c: {text: string}) => ({caption: {lines: [c.text]}}))}}));
+    bytes.srt = Buffer.from(cues.map((c: {text: string}, i: number) => `${i+1}\n00:00:${String(i*10).padStart(2,'0')},000 --> 00:00:${String((i+1)*10).padStart(2,'0')},000\n${c.text}\n`).join('\n'));
     await db.collection<Row>('generation_local_artifacts').updateOne({_id: current.artifactId!}, {$set: {manifestHash: sha256(bytes.manifest)}});
     const reader = {read: async () => bytes}, store = {configHash: 'a'.repeat(64), bucket: 'test-private', calls: 0, objects: new Map<string, Buffer>(), hook: undefined as undefined | (() => Promise<void>),
+      async read(object: StorageObject) {const data = this.objects.get(object.key); if (!data) throw new Error('missing'); return Buffer.from(data);},
       async ensure(object: StorageObject, data: Buffer) {this.calls++; verifyObject(object, data); await this.hook?.(); const old = this.objects.get(object.key); if (old) assert.deepEqual(old, data); else this.objects.set(object.key, data);}};
     return {current, bytes, reader, store, storage: new StorageService(client, name, store, reader)};
   }
-  test('private storage preparation is unique and persisted bundles are not ready/public video results', async () => {
+  test('private storage preparation is unique and atomically creates evaluation-only ready playback metadata', async () => {
     const {storage, store, current} = await storageSetup();
     await Promise.all([storage.prepare(current._id), storage.prepare(current._id)]);
     assert.equal(await db.collection('generation_storage_bundles').countDocuments(), 1);
@@ -210,6 +218,9 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!;
     assert.equal(bundle.state, 'stored'); assert.equal(bundle.objects.length, 5); assert.equal(store.objects.size, 5); assert.equal(bundle.owner, null);
     assert.equal((await run())!.state, 'rendered_local'); assert.equal((await service.job(current.jobId))!.result, null);
+    const latest = await new VideoService(client, name, context, store).latest(projectId);
+    assert.equal(latest.video!.id, bundle._id); assert.equal(latest.video!.capabilities.publish, false); assert.equal(latest.video!.capabilities.download, false);
+    assert.equal(await db.collection('video_assets').countDocuments({videoId: bundle._id, refCount: 1}), 5);
     assert.equal(engine.speechCalls, 3); assert.equal(engine.renderCalls, 1);
     assert.equal(await db.collection('activity_events').countDocuments({dedupeKey: `storage:${bundle._id}:stored`}), 1); await checkDatabase(db);
   });
@@ -290,5 +301,73 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const replacement = new StorageService(client, name, store, reader); assert.equal(await replacement.discover(), false);
     await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: null}});
     assert.equal(await replacement.discover(), true); assert.equal(await replacement.tick(), true); assert.equal(store.objects.size, 5);
+  });
+  test('playback verifies private bytes and supports bounded full, single-range and HEAD responses', async () => {
+    const {storage, store, current, bytes} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client, name, context, store), view = (await videos.latest(projectId)).video!;
+    const full = await videos.playback(view.id, null); assert.equal(full.status, 200); assert.deepEqual(Buffer.from(full.body!), bytes.mp4); assert.equal(full.headers['Cache-Control'], 'private, no-store');
+    const part = await videos.playback(view.id, 'bytes=1-1'); assert.equal(part.status, 206); assert.deepEqual(Buffer.from(part.body!), bytes.mp4.subarray(1,2));
+    assert.equal((await videos.playback(view.id, null, true)).body, null);
+    await assert.rejects(videos.playback(view.id, 'bytes=999-'), (e: unknown) => !!e && typeof e === 'object' && 'status' in e && e.status === 416);
+    assert.equal(JSON.stringify(view).includes('workspaces/'), false); assert.equal(JSON.stringify(view).includes(store.configHash), false);
+  });
+  test('foreign scope, inactive membership and deleted projects cannot resolve or play a video', async () => {
+    const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client, name, context, store), view = (await videos.latest(projectId)).video!;
+    await assert.rejects(new VideoService(client, name, {...context, workspaceId: randomUUID()}, store).get(view.id));
+    await db.collection<Row>('memberships').updateOne({userId: testUserId}, {$set: {status: 'disabled'}}); await assert.rejects(videos.playback(view.id,null), /team access/);
+    await db.collection<Row>('memberships').updateOne({userId: testUserId}, {$set: {status: 'active'}});
+    await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: new Date()}}); await assert.rejects(videos.get(view.id), /could not be found/);
+  });
+  test('corrupt remote bytes, changed destination and unavailable asset pins deny playback', async () => {
+    const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client, name, context, store), view = (await videos.latest(projectId)).video!;
+    const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!, key = bundle.objects.find(o => o.kind === 'mp4')!.key;
+    const original = store.objects.get(key)!; store.objects.set(key, Buffer.from('bad')); await assert.rejects(videos.playback(view.id,null), /temporarily unavailable/); store.objects.set(key,original);
+    await assert.rejects(new VideoService(client,name,context,{...store,configHash:'b'.repeat(64)}).get(view.id), /temporarily unavailable/);
+    await db.collection<Row>('video_assets').updateOne({videoId: view.id, 'object.kind':'mp4'}, {$set: {lifecycleState: 'deleting'}}); await assert.rejects(videos.playback(view.id,null), /temporarily unavailable/);
+  });
+  test('revocation or deletion during remote retrieval wins before a playback body is returned', async () => {
+    const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client, name, context, store), id = (await videos.latest(projectId)).video!.id, read = store.read;
+    store.read = async function(object) {const data = await read.call(this,object); await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'disabled'}}); return data;};
+    await assert.rejects(videos.playback(id,null), /team access/);
+  });
+  test('stored reconciliation is idempotent and needs no local files or additional generation', async () => {
+    const {storage, store, current, reader} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const original = (await db.collection<ReadyVideo>('ready_videos').findOne({}))!;
+    // Simulate a stored bundle from before migration 012, with local files lost.
+    await db.collection('ready_videos').deleteMany({}); await db.collection('video_assets').deleteMany({});
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{latestReadyVideoId:null,nextVideoVersionNumber:Long.ZERO}});
+    await db.collection('activity_events').deleteOne({dedupeKey:`video:${original._id}:ready`});
+    reader.read = async () => {throw new Error('local files no longer exist');};
+    await Promise.all([promoteStoredVideo(client,name,store,current._id),promoteStoredVideo(client,name,store,current._id)]);
+    assert.equal(await db.collection('ready_videos').countDocuments(),1); assert.equal(await db.collection('video_assets').countDocuments(),5);
+    const before = (await db.collection<ReadyVideo>('ready_videos').findOne({}))!;
+    await promoteStoredVideo(client,name,store,current._id);
+    assert.deepEqual(await db.collection<ReadyVideo>('ready_videos').findOne({}),before); assert.equal(engine.renderCalls,1); assert.equal(engine.speechCalls,3);
+    assert.equal(await db.collection('activity_events').countDocuments({dedupeKey:`video:${before._id}:ready`}),1);
+  });
+  test('an older render finishing storage late preserves the newer latest ready video', async () => {
+    const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client,name,context,store), first = (await videos.latest(projectId)).video!;
+    const runId = randomUUID(), approvalId = randomUUID(), artifactId = randomUUID(), versionId = randomUUID();
+    const approval = (await db.collection<Row>('approvals').findOne({_id:current.approvalId}))!;
+    const artifact = (await db.collection<Row>('generation_local_artifacts').findOne({_id:current.artifactId!}))!;
+    const plan = (await db.collection<PlanVersion>('plan_versions').findOne({_id:current.planVersionId}))!;
+    await db.collection<PlanVersion>('plan_versions').insertOne({...plan,_id:versionId,versionNumber:Long.fromNumber(2),sourcePlanningRequestId:versionId});
+    await db.collection<Row>('approvals').insertOne({...approval,_id:approvalId,planVersionId:versionId});
+    await db.collection<Row>('generation_local_artifacts').insertOne({...artifact,_id:artifactId,runId,approvalId});
+    await db.collection<GenerationRun>('generation_runs').insertOne({...current,_id:runId,jobId:randomUUID(),approvalId,planVersionId:versionId,artifactId,createdAt:new Date(current.createdAt.getTime()-60000)});
+    await storage.prepare(runId); await storage.tick(runId);
+    assert.equal((await videos.latest(projectId)).video!.id,first.id); assert.equal(await db.collection('ready_videos').countDocuments(),2);
+    const historical = (await db.collection<ReadyVideo>('ready_videos').findOne({runId}))!;
+    assert.equal(historical.versionNumber.toNumber(),2); assert.equal((await videos.get(historical._id)).generationRunId,runId);
+  });
+  test('latest-video lookup refuses a pointer to a different project in the same workspace', async () => {
+    const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const videos = new VideoService(client,name,context,store), video = (await videos.latest(projectId)).video!;
+    const other = projectFixture(); other.latestReadyVideoId = video.id; await db.collection<Row>('projects').insertOne(other);
+    await assert.rejects(videos.latest(other._id),/temporarily unavailable/);
   });
 });

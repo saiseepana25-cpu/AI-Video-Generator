@@ -11,6 +11,7 @@ import {planHistoryCollections} from './plan-history-schemas';
 import {generationCollections} from './generation-schemas';
 import {generationWorkerCollections} from './generation-worker-schemas';
 import {storageCollections} from './storage-schemas';
+import {videoCollections} from './video-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -40,6 +41,7 @@ const migrations = [
   {definition: {id: '009_generation_queue', description: 'Exact-input approvals, generation command receipts and guarded queue admission', contracts: generationCollections}, checksum: createHash('sha256').update(JSON.stringify(generationCollections)).digest('hex')},
   {definition: {id: '010_generation_worker', description: 'Generation leases, durable speech attempts and validated local artifact records', contracts: generationWorkerCollections}, checksum: createHash('sha256').update(JSON.stringify(generationWorkerCollections)).digest('hex')},
   {definition: {id: '011_private_media_storage', description: 'Private immutable media bundles and storage-only recovery leases', contracts: storageCollections}, checksum: createHash('sha256').update(JSON.stringify(storageCollections)).digest('hex')},
+  {definition: {id: '012_ready_video_playback', description: 'Immutable ready videos and owned private asset pins', contracts: videoCollections}, checksum: createHash('sha256').update(JSON.stringify(videoCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 
@@ -81,7 +83,7 @@ async function auditRows(db: Db, contract: CollectionContract) {
   for (const index of contract.indexes.filter(index => index.unique)) {
     const pipeline: Document[] = [];
     if (index.partialFilterExpression) pipeline.push({$match: index.partialFilterExpression});
-    pipeline.push({$group: {_id: Object.fromEntries(Object.keys(index.key).map(key => [key, `$${key}`])), count: {$sum: 1}}}, {$match: {count: {$gt: 1}}}, {$limit: 1});
+    pipeline.push({$group: {_id: Object.fromEntries(Object.keys(index.key).map((key, i) => [`key${i}`, `$${key}`])), count: {$sum: 1}}}, {$match: {count: {$gt: 1}}}, {$limit: 1});
     if ((await db.collection(contract.name).aggregate(pipeline, {maxTimeMS: 10000}).toArray()).length) {
       throw new DatabaseSetupError(`DUPLICATE_EXISTING_KEYS:${contract.name}`);
     }

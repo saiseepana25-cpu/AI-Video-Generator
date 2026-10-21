@@ -26,7 +26,7 @@ export type FieldError = {path: string; code: string; message: string};
 export class ProjectError extends Error {
   constructor(public readonly code: string, public readonly status: number, message: string,
     public readonly fieldErrors: FieldError[] = [], public readonly retryable = false,
-    public readonly details: {currentRevision?: number; updatedAt?: string; updatedBy?: ActorSummary} = {}) { super(message); }
+    public readonly details: {currentRevision?: number; updatedAt?: string; updatedBy?: ActorSummary; size?: number} = {}) { super(message); }
 }
 
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

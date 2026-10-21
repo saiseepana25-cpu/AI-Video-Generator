@@ -17,5 +17,5 @@ export type StorageBundle = {_id: string; schemaVersion: 1; workspaceId: string;
   createdAt: Date; updatedAt: Date; storedAt: Date | null; error: string | null};
 export type StorageSource = {run: GenerationRun; artifact: LocalArtifact; approval: Approval};
 export interface ArtifactReader {read(source: StorageSource): Promise<Record<StorageKind, Buffer>>;}
-export interface ObjectStore {configHash: string; bucket: string; ensure(object: StorageObject, bytes: Buffer): Promise<void>;}
+export interface ObjectStore {configHash: string; bucket: string; ensure(object: StorageObject, bytes: Buffer): Promise<void>; read(object: StorageObject): Promise<Buffer>;}
 export class StorageFault extends Error {constructor(public code: string) {super(code);}}
