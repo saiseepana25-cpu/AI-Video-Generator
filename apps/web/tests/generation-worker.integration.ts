@@ -145,6 +145,46 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const replacement = new GenerationWorker(client, name, providerEnv, new FakeEngine()); await replacement.heartbeat(); await replacement.recoverExpired(); release.resolve(); await old;
     assert.equal(engine.speechCalls, 0); assert.equal((await run())!.state, 'failed'); assert.equal((await provider())!.reservations.length, 0); assert.equal((await provider())!.allowance.observedRemaining, 10000);
   });
+  for (const stage of ['rendering', 'validating'] as const) for (const cancelling of [false, true]) {
+    test(`expired ${stage} lease ${cancelling ? 'with cancellation' : 'without cancellation'} retains the physical slot without executor-stop evidence`, async () => {
+      await approve();
+      // A second, independently approved project must not start while the old
+      // renderer ignores abort/loses DB connectivity, even after slot takeover.
+      const secondProjectId = randomUUID(), secondPlanId = randomUUID();
+      const firstProject = (await db.collection<Row>('projects').findOne({_id: projectId}))!;
+      await db.collection<Row>('projects').insertOne({...firstProject, _id: secondProjectId, revision: Long.ONE, latestRunId: null, currentPlanVersionId: secondPlanId, planningRequestId: secondPlanId});
+      const firstPlan = (await db.collection<PlanVersion>('plan_versions').findOne({_id: planId}))!;
+      await db.collection<PlanVersion>('plan_versions').insertOne({...firstPlan, _id: secondPlanId, projectId: secondProjectId, sourcePlanningRequestId: secondPlanId});
+      const second = await service.approve(secondProjectId, {...body(), planVersionId: secondPlanId}, randomUUID());
+      const started = deferred<void>(), release = deferred<void>();
+      engine.duringRender = async () => {
+        if (stage === 'validating') await db.collection<GenerationRun>('generation_runs').updateOne({projectId}, {$set: {stage}});
+        started.resolve(); await release.promise;
+      };
+      const old = worker.tick(); await started.promise;
+      try {
+        if (cancelling) await cancelCurrent();
+        await db.collection<GenerationRun>('generation_runs').updateOne({projectId}, {$set: {leaseUntil: new Date(0)}});
+        await db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local'}, {$set: {expiresAt: new Date(0)}});
+        const beforeRun = await run(), beforeProvider = await provider();
+        const beforeProject = await db.collection<Row>('projects').findOne({_id: projectId});
+        const replacementEngine = new FakeEngine(), replacement = new GenerationWorker(client, name, providerEnv, replacementEngine);
+        assert.equal(await replacement.heartbeat(), true);
+        assert.equal(await replacement.recoverExpired(), 0);
+        assert.equal(await replacement.tick(), false);
+        assert.deepEqual(await run(), beforeRun); assert.deepEqual(await provider(), beforeProvider);
+        assert.deepEqual(await db.collection<Row>('projects').findOne({_id: projectId}), beforeProject);
+        assert.equal((await service.job(second.job.jobId))!.state, 'queued');
+        assert.equal(engine.renderCalls, 1); assert.equal(replacementEngine.speechCalls, 0); assert.equal(replacementEngine.renderCalls, 0);
+        release.resolve(); await old;
+        // Even a late result/file is not durable process-tree stop evidence.
+        assert.equal(await replacement.recoverExpired(), 0); assert.equal(await replacement.tick(), false);
+        assert.deepEqual(await run(), beforeRun); assert.equal(await db.collection('generation_local_artifacts').countDocuments(), 0);
+        assert.equal((await service.job(second.job.jobId))!.state, 'queued');
+        assert.equal(replacementEngine.speechCalls, 0); assert.equal(replacementEngine.renderCalls, 0);
+      } finally {release.resolve(); await old;}
+    });
+  }
   test('project deletion after claim prevents any subsequent external request and cannot resurrect the project', async () => {
     await approve(); engine.beforeObservation = async () => {await db.collection<Row>('projects').updateOne({_id: projectId}, {$set: {deletedAt: new Date()}});};
     await worker.tick(); assert.equal(engine.speechCalls, 0); assert.equal((await run())!.state, 'failed'); assert.ok((await db.collection<Row>('projects').findOne({_id: projectId}))!.deletedAt);

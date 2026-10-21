@@ -73,7 +73,12 @@ export class GenerationWorker {
   async recoverExpired() {
     return databaseTransaction(this.client, this.name, async (db, session) => {
       await this.slot(db, session);
-      const expired = await db.collection<GenerationRun>('generation_runs').find({state: {$in: activeStates}, leaseUntil: {$lte: new Date()}}, {session}).limit(20).toArray();
+      // Lease expiry fences DB writes, not Chrome/FFmpeg. This executor has no
+      // durable process-tree termination evidence, so keep possible renders
+      // active (including cancellation requests) and preserve the sole slot.
+      // Validation may still have FFmpeg children; files/abort/owner loss are
+      // not stop evidence. A future recovery path must verify termination first.
+      const expired = await db.collection<GenerationRun>('generation_runs').find({state: {$in: activeStates}, leaseUntil: {$lte: new Date()}, stage: {$nin: ['rendering', 'validating']}}, {session}).limit(20).toArray();
       for (const run of expired) await this.finishWithin(db, session, run, 'WORKER_INTERRUPTED');
       return expired.length;
     });
