@@ -11,6 +11,6 @@ export async function generationHttp(request: Request, id: string, mutation: boo
     requireMutationOrigin(request, new URL(process.env.AUTH_URL!).origin);
     const key = requireIdempotencyKey(request.headers.get('idempotency-key'));
     const result = await service.approve(id, await readProjectBody(request), key);
-    return dataResponse(result.job, {status: result.job.state === 'cancelled' ? 200 : 202, headers: {'Idempotency-Replayed': String(result.replayed)}});
+    return dataResponse(result.job, {status: ['queued', 'running', 'cancellation_requested'].includes(result.job.state) ? 202 : 200, headers: {'Idempotency-Replayed': String(result.replayed)}});
   } catch (error) {return projectErrorResponse(error);}
 }

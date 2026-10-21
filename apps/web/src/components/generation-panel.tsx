@@ -12,10 +12,13 @@ export function GenerationPanel({projectId, revision, scope, checked, enabled, o
   const [job, setJob] = useState<GenerationView | null>(null), [command, setCommand] = useState<GenerationCommand | null>(null);
   const [loaded, setLoaded] = useState(false), [sending, setSending] = useState(false), [message, setMessage] = useState('');
   const busy = useRef(false), storageKey = `${scope}:generation-command:v1`;
+  const latest = useRef({revision, enabled, onSaved}); latest.current = {revision, enabled, onSaved};
   const load = useCallback(async () => {
     try {
       const response = await fetch(`/api/v1/projects/${projectId}/generations`, {cache: 'no-store', signal: AbortSignal.timeout(10000)});
       if (!response.ok) throw new Error(); const result = await response.json(); setJob(result.data.job); setLoaded(true);
+      setMessage(previous => previous.startsWith('Could not confirm generation status.') ? '' : previous);
+      if (result.data.job && !['queued', 'running', 'cancellation_requested'].includes(result.data.job.state) && result.data.job.projectRevision > latest.current.revision && latest.current.enabled) await latest.current.onSaved();
     } catch {setLoaded(false); setMessage('Could not confirm generation status. Reconnect and refresh before starting another request.');}
   }, [projectId]);
   useEffect(() => {
@@ -23,7 +26,7 @@ export function GenerationPanel({projectId, revision, scope, checked, enabled, o
     catch {setMessage('Tab recovery is unavailable. Keep this tab open.'); return;}
     void load(); const timer = setInterval(() => void load(), 3000); return () => clearInterval(timer);
   }, [storageKey, projectId, load]);
-  const active = job?.state === 'queued';
+  const active = !!job && ['queued', 'running', 'cancellation_requested'].includes(job.state);
   useEffect(() => {onPending(!loaded || !!command || sending || active); return () => onPending(false);}, [loaded, command, sending, active, onPending]);
   async function submit(next: GenerationCommand) {
     if (busy.current) return; busy.current = true; setSending(true);
@@ -48,8 +51,9 @@ export function GenerationPanel({projectId, revision, scope, checked, enabled, o
     }}>Approve & generate video</Button></div>
     <p className="muted-copy">Approve the saved narration, matching subtitles and diagrams together. Generation uses the reviewed voice and settings, with free evaluation allowance only.</p>
     {!checked && !active && <p className="muted-copy">Check your video plan first. A compatible local generation worker must be running before approval is available.</p>}
-    {job && <div aria-live="polite"><p><strong>Video · {job.state}</strong></p><p className="muted-copy">{active ? 'Queued. Audio and final video are not ready yet.' : 'Cancelled before generation started. Review a new plan version to request another take.'}</p>
-      {active && <Button variant="secondary" disabled={!!command || sending} onClick={() => void submit({projectId, key: crypto.randomUUID(), action: 'cancel', targetId: job.jobId, body: {expectedRevision: job.statusRevision}})}>Cancel queued video</Button>}</div>}
+    {job && <div aria-live="polite"><p><strong>Video · {job.state.replaceAll('_', ' ')}</strong></p><p className="muted-copy">{job.state === 'queued' ? 'Waiting for the local generation worker.' : job.state === 'running' ? `Working on ${job.stage.replaceAll('_', ' ')}. You can leave this page and return.` : job.state === 'cancellation_requested' ? 'Stopping generation. Submitted speech may still consume free allowance.' : job.state === 'rendered_local' ? 'Rendered and validated locally. Dashboard playback and downloads are the next storage milestone.' : job.state === 'cancelled' ? 'Generation stopped. Review a new plan version to request another take.' : 'Generation did not finish. Your reviewed plan is retained.'}</p>
+      {job.error && <p role="alert">{job.error.message}</p>}
+      {job.allowedActions.includes('cancel') && <Button variant="secondary" disabled={!!command || sending} onClick={() => void submit({projectId, key: crypto.randomUUID(), action: 'cancel', targetId: job.jobId, body: {expectedRevision: job.statusRevision}})}>{job.state === 'queued' ? 'Cancel queued video' : 'Request cancellation'}</Button>}</div>}
     {message && <p role="alert">{message}</p>}
     {command && <Button variant="secondary" disabled={sending} onClick={() => void submit(command)}>{sending ? 'Checking…' : 'Check same generation request'}</Button>}
     <Button variant="secondary" disabled={sending} onClick={() => void load()}>Refresh video status</Button>

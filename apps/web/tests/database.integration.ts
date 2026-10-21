@@ -239,6 +239,7 @@ describe('database foundation on a real local replica set', {concurrency: false}
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '007_plan_text_edits'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '008_plan_history'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '009_generation_queue'});
+    await partial.collection<Row>('schema_migrations').deleteOne({_id: '010_generation_worker'});
     await partial.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '003_project_editing'});
     await partial.collection<Row>('schema_migrations').updateOne({_id: projectMigration.id}, {$set: {state: 'failed'}});

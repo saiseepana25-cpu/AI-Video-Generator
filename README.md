@@ -1,5 +1,25 @@
 # VideoCraft
 
+## Dashboard generation worker (F09b/F10b)
+
+Install both dependency trees and configure Google/MongoDB/provider settings as described below. The worker uses `apps/web/.env.local` and reads the existing root Remotion license confirmation without printing credentials. Stop application/worker writes before applying migration 010, then use separate terminals from the repository root:
+
+```sh
+npm run web:db:migrate
+npm run web:db:check
+npm run web:start
+```
+
+```sh
+npm run web:generation -- worker
+# In another terminal, inspect safe queue/heartbeat status:
+npm run web:generation -- status
+```
+
+The real worker registers verified local fonts/build capabilities and processes only explicitly approved jobs. In a saved project, select the tested evaluation voice/accent, check the plan, then use **Approve & generate video**. Free-account/model/access/allowance checks run before every phrase; there is no paid provider, automatic speech retry or diagnostic fallback. Keep the worker terminal open; Ctrl+C drains/aborts work conservatively. Restart both worker and dashboard after changing environment settings. A stopped, incompatible or disabled worker blocks new approval.
+
+Status supports queued/running/cancellation requested/failed/cancelled/**rendered locally**. Running cancellation is best effort; speech already sent can consume free allowance. Unknown outcomes pause new speech for operator review and are never retried automatically. Fully validated local output lives under ignored `output/dashboard-renders/<runId>/<artifactId>/`, with source clips under `output/dashboard-speech/<runId>/`. These operator files are not yet dashboard playback/downloads, ready videos or publishable media; R2 delivery is F11. Do not manually change an uncertain reservation to retry a request whose consumption is unresolved.
+
 ## Selected-language diagram renderer (F10a)
 
 The new local adapter renders the dashboard's strict `educational-diagrams-v1` input directly, with sequence/cycle/comparison motion, local pinned fonts, measured phrase audio, matching captions and MP4/media checks. It is separate from the older bilingual prototype below. Install both dependency trees (`npm ci` and `npm ci --prefix apps/web`) and keep `REMOTION_FREE_LICENSE_CONFIRMED=true` in the ignored root `.env.local` only after confirming eligibility.

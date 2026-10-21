@@ -17,6 +17,7 @@ import {buildRenderPlan, canonicalJson, generationHash, type FontPins} from '../
 import {RenderInputService} from '../rendering/service';
 import {compatibleWorker, readGenerationWorker, workerUnavailable} from './capability';
 import {generationView, type Approval, type GenerationRun, type GenerationView, type GenerationWorker} from './contracts';
+import {closeGenerationReservation} from './reservation';
 
 const fail = (code: string, status: number, message: string) => new ProjectError(code, status, message);
 type Receipt = {_id: string; workspaceId: string; userId: string; scope: string; keyHash: string; requestHash: string; projectId: string; runId: string; snapshotCanonical: string; createdAt: Date};
@@ -140,15 +141,18 @@ export class GenerationService {
       if (!run) throw fail('RESOURCE_NOT_FOUND', 404, 'This generation could not be found.');
       const project = await this.project(db, run.projectId, session);
       if (run.statusRevision.toNumber() !== input.expectedRevision) throw fail('STALE_REVISION', 409, 'Generation status changed. Refresh before cancelling.');
-      if (run.state !== 'queued') throw fail('CANCELLATION_UNAVAILABLE', 409, 'Only an unclaimed queued generation can be cancelled here.');
+      if (!['queued', 'running', 'cancellation_requested'].includes(run.state)) throw fail('CANCELLATION_UNAVAILABLE', 409, 'This generation is already finished.');
       await this.authorize(db, session, true);
-      const now = new Date(), speech = await db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'}, {session});
-      const held = speech?.reservations.find(r => r.id === run.reservationId && r.state === 'reserved');
-      if (held && speech) {
-        const remaining = speech.allowance.observedRemaining;
-        const refund = speech.configHash === run.providerConfigHash && speech.allowance.periodId === run.reservationPeriodId && remaining !== null && Number.isSafeInteger(remaining + held.units) && remaining + held.units <= Number.MAX_SAFE_INTEGER;
-        await db.collection<ProviderControl>('provider_controls').updateOne({_id: speech._id, revision: speech.revision}, {$pull: {reservations: {id: held.id, state: 'reserved'}}, $inc: {revision: Long.ONE, ...(refund ? {'allowance.observedRemaining': held.units} : {})}}, {session});
+      if (run.state !== 'queued') {
+        const next: GenerationRun = run.state === 'cancellation_requested' ? run : {...run, state: 'cancellation_requested', statusRevision: run.statusRevision.add(Long.ONE), updatedAt: new Date()};
+        if (run.state === 'running') {
+          await db.collection<GenerationRun>('generation_runs').replaceOne({_id: run._id, state: 'running', statusRevision: run.statusRevision}, next, {session});
+          await this.event(db, session, next, 'Video cancellation was requested. Submitted speech can still consume allowance.');
+        }
+        const job = generationView(next, project.revision.toNumber()); await this.receipt(db, session, identity, requestHash, next, job); return {job, replayed: false};
       }
+      const now = new Date();
+      await closeGenerationReservation(db, session, run, 'unused');
       await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id, state: 'queued', statusRevision: run.statusRevision}, {$set: {state: 'cancelled', updatedAt: now, finishedAt: now}, $inc: {statusRevision: Long.ONE}}, {session});
       const clearsPointer = project.latestRunId === run._id;
       if (project.revision.toNumber() >= Number.MAX_SAFE_INTEGER) throw fail('REVISION_LIMIT', 409, 'This project has reached its revision limit.');

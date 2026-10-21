@@ -18,7 +18,7 @@ export async function planningCommand(request: Request, id: string, action: Kind
       if (await generation.job(id)) {
         if (action === 'retry') throw new ProjectError('GENERATION_RETRY_UNAVAILABLE', 409, 'Generation retries will be available with the renderer.');
         const result = await generation.cancel(id, body, key);
-        return dataResponse(result.job, {headers: {'Idempotency-Replayed': String(result.replayed)}});
+        return dataResponse(result.job, {status: result.job.state === 'cancellation_requested' ? 202 : 200, headers: {'Idempotency-Replayed': String(result.replayed)}});
       }
     }
     const result = await service.command(action === 'plan' || action === 'brainstorm' ? id : null, action === 'cancel' || action === 'retry' ? id : null, action, body, key);
