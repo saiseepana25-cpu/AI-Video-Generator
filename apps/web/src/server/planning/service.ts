@@ -38,9 +38,10 @@ export class PlanningService {
     if (!row) throw fail('RESOURCE_NOT_FOUND', 404, 'This plan could not be found.');
     const project = await this.project(row.projectId);
     const isCurrent = project.currentPlanVersionId === row._id && project.briefRevision.equals(row.sourceBriefRevision) && project.planningRequestId === row.sourcePlanningRequestId;
-    return {id: row._id, projectId: row.projectId, versionNumber: row.versionNumber.toNumber(), sourceBriefRevision: row.sourceBriefRevision.toNumber(),
+    return {id: row._id, projectId: row.projectId, versionNumber: row.versionNumber.toNumber(), projectRevision: project.revision.toNumber(), sourceBriefRevision: row.sourceBriefRevision.toNumber(),
+      source: row.source ?? 'ai', parentPlanVersionId: row.parentPlanVersionId ?? null, contentHash: row.contentHash ?? null, canEdit: isCurrent && !project.activePlanningJobId && !project.latestRunId,
       plan: row.plan, settingsSnapshot: row.settingsSnapshot, inputHash: row.inputHash, isCurrent, canGenerate: false,
-      blockedReasons: [{code: isCurrent ? 'REVIEW_NOT_IMPLEMENTED' : 'PLAN_OUTDATED', message: isCurrent ? 'Plan editing and approval are the next feature.' : 'The saved brief has changed. Prepare a new plan.'}]};
+      blockedReasons: [{code: isCurrent ? 'APPROVAL_NOT_IMPLEMENTED' : 'PLAN_OUTDATED', message: isCurrent ? 'Plan approval and generation are upcoming features.' : 'The saved brief or proposal has changed. Review the latest plan.'}]};
   }
   async overview(id: string) {
     await this.authorize(); requireProjectId(id); const project = await this.project(id);

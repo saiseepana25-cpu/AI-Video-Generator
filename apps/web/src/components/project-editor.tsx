@@ -108,6 +108,13 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
       {state.mode === 'review' && <div className="recovery-panel"><p>Review is paused. Saving will replace the saved brief/options with the edits shown above.</p><Button onClick={() => void save()}>Save my edits</Button></div>}
       <PlanningPanel projectId={project.id} revision={state.base.revision} briefRevision={state.base.briefRevision} scope={scope}
         ready={loaded && !recovery && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
+        onProjectSaved={async () => {
+          const response = await fetch(`/api/v1/projects/${project.id}`, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
+          if (!response.ok) throw new Error('Could not refresh the project revision.');
+          const value = await response.json(), s = current.current;
+          if (s.pending || !sameDraft(s.base, s.draft)) throw new Error('Brief edits are pending.');
+          update({...s, base: value.data, draft: editable(value.data)});
+        }}
         onIdea={(angle, jobId) => {
           if (busy.current || dirty || state.pending || planningPending) return;
           const draft = {...editable(state.base), brief: {...state.base.brief, idea: `${angle.title}\n${angle.hook}\n${angle.learningObjective}`}};
