@@ -1,0 +1,14 @@
+import type {Document} from 'mongodb';
+import {ownedCollections,type CollectionContract} from './schemas';
+import {generationCollections} from './generation-schemas';
+const uuid={bsonType:'string',pattern:'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'},hash={bsonType:'string',pattern:'^[a-f0-9]{64}$'};
+const nullable=(value:Document)=>({oneOf:[value,{bsonType:'null'}]});
+const obj=(properties:Record<string,Document>)=>({bsonType:'object',additionalProperties:false,required:Object.keys(properties),properties});
+const workspace=structuredClone(ownedCollections.find(c=>c.name==='workspaces')!);
+workspace.validator.$jsonSchema.properties.defaults.properties.preferredAccentId=nullable(workspace.validator.$jsonSchema.properties.defaults.properties.preferredAccentId);
+const activity=structuredClone(generationCollections.find(c=>c.name==='activity_events')!);
+activity.validator.$jsonSchema.properties.projectId=nullable(uuid);
+activity.validator.$jsonSchema.properties.resourceRefs={oneOf:[activity.validator.$jsonSchema.properties.resourceRefs,obj({workspaceId:uuid})]};
+activity.validator.$jsonSchema.properties.type.enum.push('workspace_settings_changed');
+const snapshot=obj({revision:{bsonType:['int','long','double'],minimum:1,maximum:Number.MAX_SAFE_INTEGER},timezone:{bsonType:'string',minLength:1,maxLength:100},defaults:structuredClone(workspace.validator.$jsonSchema.properties.defaults),brandKitRevisionId:nullable(uuid)});
+export const workspaceSettingsCollections:CollectionContract[]=[workspace,activity,{name:'workspace_settings_commands',validator:{$jsonSchema:obj({_id:uuid,workspaceId:uuid,userId:{bsonType:'string',pattern:'^[a-f0-9]{24}$'},keyHash:hash,requestHash:hash,snapshot,createdAt:{bsonType:'date'}})},indexes:[{key:{workspaceId:1,userId:1,keyHash:1},name:'workspace_settings_replay_v1',unique:true}]}];

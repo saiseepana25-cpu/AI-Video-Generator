@@ -15,9 +15,9 @@ export type Membership = {
 };
 export type Workspace = {
   _id: string; schemaVersion: 1; name: string; timezone: string;
-  defaults: {language: 'en' | 'te'; targetSeconds: 30 | 60 | 90; preferredAccentId: string; preferredVoiceCatalogId: string | null; themeId: string; captionStyleId: string};
+  defaults: {language: 'en' | 'te'; targetSeconds: 30 | 60 | 90; preferredAccentId: string | null; preferredVoiceCatalogId: string | null; themeId: string; captionStyleId: string};
   settingsRevision: Long; brandKitRevisionId: string | null; brandRevision: Long; nextActivitySequence: Long;
-  createdAt: Date; updatedAt: Date; updatedBy: {kind: 'system'; service: string};
+  createdAt: Date; updatedAt: Date; updatedBy: {kind: 'system'; service: string}|{kind:'user';userId:string};
 };
 
 export const authDatabase = applicationDatabase;
@@ -40,7 +40,7 @@ export async function enrollMember(settings: AuthSettings, userId: string, email
   // Bootstrap is idempotent, and never overwrites existing workspace settings.
   await db.collection<Workspace>('workspaces').updateOne({_id:settings.workspaceId}, {$setOnInsert:{
     schemaVersion:1,name:settings.workspaceName,timezone:'Asia/Kolkata',
-    defaults:{language:'en',targetSeconds:60,preferredAccentId:'indian',preferredVoiceCatalogId:null,themeId:'clean-educational-v1',captionStyleId:'readable-default-v1'},
+    defaults:{language:'en',targetSeconds:60,preferredAccentId:null,preferredVoiceCatalogId:null,themeId:'clean-educational-v1',captionStyleId:'readable-default-v1'},
     settingsRevision:Long.ONE,brandKitRevisionId:null,brandRevision:Long.ZERO,nextActivitySequence:Long.ZERO,
     createdAt:now,updatedAt:now,updatedBy:{kind:'system',service:'auth-bootstrap'},
   }}, {upsert:true});

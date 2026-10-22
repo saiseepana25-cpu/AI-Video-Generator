@@ -5,7 +5,7 @@ import {Long, MongoClient, ObjectId, type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {checkDatabase, migrateDatabase} from '../src/server/db/migrations';
 import {planningCollections} from '../src/server/db/planning-schemas';
-import {generationCollections} from '../src/server/db/generation-schemas';
+import {workspaceSettingsCollections} from '../src/server/db/workspace-settings-schemas';
 import {ProjectService} from '../src/server/projects/service';
 import {ProjectError, type ProjectContext} from '../src/server/projects/contracts';
 import {parseListOptions} from '../src/server/projects/validation';
@@ -153,7 +153,7 @@ describe('shared project library on a real local replica set', {concurrency: fal
   test('an event-write failure rolls back project, command receipt and counter together', async () => {
     const projects = await db.collection('projects').countDocuments(), receipts = await db.collection('idempotency_records').countDocuments();
     const previous = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});
-    const eventContract = generationCollections.find(contract => contract.name === 'activity_events')!;
+    const eventContract = workspaceSettingsCollections.find(contract => contract.name === 'activity_events')!;
     await db.command({collMod: 'activity_events', validator: {$jsonSchema: {bsonType: 'object', required: ['controlled_failure']}}});
     try {await assert.rejects(service.create(input(), randomUUID()), error => !!error && typeof error === 'object' && 'code' in error && error.code === 121);}
     finally {await db.command({collMod: 'activity_events', validator: eventContract.validator});}

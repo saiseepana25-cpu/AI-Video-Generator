@@ -1,5 +1,13 @@
 # VideoCraft
 
+## Shared workspace defaults (F13a)
+
+Settings now saves the team's default English/Telugu language, 30/60/90-second length, separate verified voice/accent and IANA timezone. Both voice controls can stay unselected. Saves require the current workspace revision and preserve the exact command if the outcome is unconfirmed; Check same settings save resolves it. Reload saved settings replaces unsaved form edits. The existing educational theme and readable captions stay curated.
+
+Newly loaded project composers capture workspace defaults, with an existing personal language override taking precedence. Language changes clear the voice/accent pair. Existing drafts, pending create commands, projects and completed videos retain their settings. API creation still requires complete explicit settings; retries never resolve changed defaults. An unavailable preferred voice is refused rather than silently substituted. New generation/usage is not triggered by changing defaults.
+
+Stop app/worker writes, apply/check migration 014, build/restart the dashboard. No new credentials or package dependencies. Brand/logo customization and personal preferences are later F13 slices; timezone updates do not move existing schedule instants.
+
 ## Verified local speech reuse (F12c)
 
 After migration 013 and a worker restart, a newly approved plan can reuse unchanged narration from successful earlier runs in the same project. The worker verifies source approval/model/voice/settings and the actual saved WAV checksum before use. Changed or unavailable clips follow ordinary free-only synthesis. Visual edits can avoid new speech calls; all clips still get fresh measured timing, matching captions and a new render. Earlier ready videos remain available.

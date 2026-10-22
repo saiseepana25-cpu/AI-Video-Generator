@@ -243,6 +243,8 @@ describe('database foundation on a real local replica set', {concurrency: false}
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '011_private_media_storage'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '012_ready_video_playback'});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '013_verified_speech_reuse'});
+    await partial.collection<Row>('schema_migrations').deleteOne({_id: '014_workspace_settings'});
+    await partial.command({collMod:'workspaces',validator:ownedCollections.find(c=>c.name==='workspaces')!.validator});
     await partial.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     await partial.collection<Row>('schema_migrations').deleteOne({_id: '003_project_editing'});
     await partial.collection<Row>('schema_migrations').updateOne({_id: projectMigration.id}, {$set: {state: 'failed'}});
