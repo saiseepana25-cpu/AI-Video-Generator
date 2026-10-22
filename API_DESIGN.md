@@ -1,5 +1,13 @@
 # VideoCraft — V1 API Design
 
+## F12a deployed slice — completed-video history (22 October 2026)
+
+API-15 now also supports GET `/api/v1/projects/{projectId}/versions?kind=video&limit=10&cursor=...`. Default limit 10, range 1–50; duplicate/unknown parameters, missing/unsupported kind, empty cursor and invalid limits return 400. Returns the standard data/meta envelope with `{items:[{id,projectId,versionNumber,planVersionId,language,captionLanguage,durationSeconds,readyAt,usagePolicy:"evaluation_only",isLatest}],page:{hasMore,nextCursor}}`. Descending version-number keysets use a one-hour HMAC cursor bound to workspace/project/kind/limit and AUTH_SECRET. Plan/video cursor domains are distinct. Bad/tampered/expired/cross-scope cursors return 400 INVALID_CURSOR. New completions appear on refresh; older-page traversal excludes newly inserted higher version numbers.
+
+Active membership, live project and scoped rows are read in one snapshot transaction. Missing/foreign/deleted project returns 404; inactive member 403; missing session 401. Responses are private/no-store with request IDs. This metadata read needs no R2 configuration or provider call and exposes no storage descriptors, transcript, raw voice IDs or media URLs. Summaries record completed provenance, not a remote availability probe. Open a selected ID through API-22's existing GET detail; playback/download recheck current access, destination, owned pins and actual bytes. A currently unavailable old file fails safely; history never rerenders it or substitutes another version.
+
+Selection is local viewing state only. It does not restore a plan, change project/latest pointers, approve generation or confer publication permission. The dashboard explicitly returns to latest; polling a selected older version does not jump to new output. Targeted regeneration and verified speech reuse remain later F12 slices. Existing F08c kind=plan behavior is unchanged.
+
 ## F11c deployed slice — owned downloads (21 October 2026)
 
 This extends the F11b local proxy contract below. VideoView now has capabilities.download:true and downloadUrls `{mp4:"/api/v1/videos/{id}/downloads/mp4",srt:"/api/v1/videos/{id}/downloads/srt"}`. These are authenticated application paths, not bearer URLs. Publication remains false/evaluation_only.

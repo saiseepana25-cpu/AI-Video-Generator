@@ -20,6 +20,7 @@ import {storageKinds, StorageFault, type StorageBundle, type StorageKind, type S
 import {sha256, verifyObject} from '../src/server/storage/r2';
 import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
 import type {ReadyVideo} from '../src/server/videos/contracts';
+import {VideoHistoryService} from '../src/server/videos/history';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -408,11 +409,44 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal((await videos.latest(projectId)).video!.id,first.id); assert.equal(await db.collection('ready_videos').countDocuments(),2);
     const historical = (await db.collection<ReadyVideo>('ready_videos').findOne({runId}))!;
     assert.equal(historical.versionNumber.toNumber(),2); assert.equal((await videos.get(historical._id)).generationRunId,runId);
+    const history = await new VideoHistoryService(client,name,context,'test-history-secret').versions(projectId,new URLSearchParams('kind=video'));
+    assert.deepEqual(history.items.map(v=>[v.versionNumber,v.isLatest]),[[2,false],[1,true]]);
+    assert.equal((await videos.playback(historical._id,null)).status,200);
+    assert.equal((await videos.download(historical._id,'srt',null)).status,200);
+    assert.equal((await videos.latest(projectId)).video!.id,first.id);
   });
   test('latest-video lookup refuses a pointer to a different project in the same workspace', async () => {
     const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
     const videos = new VideoService(client,name,context,store), video = (await videos.latest(projectId)).video!;
     const other = projectFixture(); other.latestReadyVideoId = video.id; await db.collection<Row>('projects').insertOne(other);
     await assert.rejects(videos.latest(other._id),/temporarily unavailable/);
+  });
+  test('video history is empty for a live draft and denies foreign, disabled and deleted scopes', async () => {
+    const history = new VideoHistoryService(client,name,context,'test-history-secret'), query = new URLSearchParams('kind=video');
+    assert.deepEqual(await history.versions(projectId,query),{items:[],page:{hasMore:false,nextCursor:null}});
+    await assert.rejects(new VideoHistoryService(client,name,{...context,workspaceId:randomUUID()},'test-history-secret').versions(projectId,query));
+    await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'disabled'}});
+    await assert.rejects(history.versions(projectId,query), /team access/);
+    await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'active'}});
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{deletedAt:new Date()}});
+    await assert.rejects(history.versions(projectId,query), /could not be found/);
+  });
+  test('video history keysets preserve completed versions through concurrent inserts without changing latest', async () => {
+    const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
+    const original = (await db.collection<ReadyVideo>('ready_videos').findOne({}))!, before = await db.collection<Row>('projects').findOne({_id:projectId});
+    // Additional isolated metadata fixtures exercise pagination; they never enter the application DB.
+    for (let version=2;version<=4;version++) await db.collection<ReadyVideo>('ready_videos').insertOne({...original,_id:randomUUID(),runId:randomUUID(),bundleId:randomUUID(),versionNumber:Long.fromNumber(version)});
+    const history = new VideoHistoryService(client,name,context,'test-history-secret'), first = await history.versions(projectId,new URLSearchParams('kind=video&limit=2'));
+    assert.deepEqual(first.items.map(v=>v.versionNumber),[4,3]); assert.equal(first.page.hasMore,true);
+    await db.collection<ReadyVideo>('ready_videos').insertOne({...original,_id:randomUUID(),runId:randomUUID(),bundleId:randomUUID(),versionNumber:Long.fromNumber(5)});
+    const second = await history.versions(projectId,new URLSearchParams({kind:'video',limit:'2',cursor:first.page.nextCursor!}));
+    assert.deepEqual(second.items.map(v=>v.versionNumber),[2,1]); assert.equal(second.page.nextCursor,null); assert.equal(second.items[1].isLatest,true);
+    assert.deepEqual(await db.collection<Row>('projects').findOne({_id:projectId}),before);
+    assert.equal((await history.versions(projectId,new URLSearchParams('kind=video&limit=2'))).items[0].versionNumber,5);
+    const serialized = JSON.stringify(first); for (const privateValue of [original.bucket,original.configHash,original.mp4Sha256,'workspaces/','downloadUrls','transcript']) assert.equal(serialized.includes(privateValue),false);
+    assert.equal(engine.renderCalls,1); assert.equal(engine.speechCalls,3);
+    const other = projectFixture(); await db.collection<Row>('projects').insertOne(other);
+    assert.equal((await history.versions(other._id,new URLSearchParams('kind=video'))).items.length,0);
+    await assert.rejects(history.versions(other._id,new URLSearchParams({kind:'video',limit:'2',cursor:first.page.nextCursor!})), /expired or changed/);
   });
 });

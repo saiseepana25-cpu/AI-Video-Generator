@@ -1,7 +1,7 @@
 import {createHmac, timingSafeEqual} from 'node:crypto';
 import {ProjectError} from '../projects/contracts';
 export function historyQuery(params: URLSearchParams) {
-  if ([...params.keys()].some(k => !['kind', 'limit', 'cursor'].includes(k) || params.getAll(k).length !== 1) || params.get('kind') !== 'plan') throw new ProjectError('INVALID_QUERY', 400, 'Use kind=plan. Video history is not available yet.');
+  if ([...params.keys()].some(k => !['kind', 'limit', 'cursor'].includes(k) || params.getAll(k).length !== 1) || params.get('kind') !== 'plan') throw new ProjectError('INVALID_QUERY', 400, 'Use kind=plan for plan history.');
   const value = params.get('limit') ?? '10';
   if (!/^\d{1,2}$/.test(value) || +value < 1 || +value > 50 || params.has('cursor') && !params.get('cursor')) throw new ProjectError('INVALID_QUERY', 400, 'Choose a page size from 1 to 50 and a valid cursor.');
   return {limit: +value, cursor: params.get('cursor')};

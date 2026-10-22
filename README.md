@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Completed-video history (F12a)
+
+Open **View video history** in the finished-video panel to browse completed versions, load older pages and view a selected version's player, transcript and downloads. **Return to latest video** resumes following the current latest output. Viewing an older version does not change the saved plan or latest-video pointer. A newly arriving video does not interrupt an older version you selected. History is metadata, so a listed video may still be temporarily unavailable at playback/download time; refresh or explicitly choose another version, with no automatic regeneration.
+
+GET `/api/v1/projects/<project-id>/versions?kind=video&limit=10` adds scoped, signed keyset pagination without a migration or new credentials. Media endpoints retain all existing ownership/checksum safeguards and evaluation-only restrictions. Targeted regeneration/speech reuse and real combined generation-to-download acceptance remain pending.
+
 ## Private downloads (F11c)
 
 The finished-video panel offers Download MP4 and Download subtitles (.srt) for ready output. Files retain the reviewed version/language; English uses English SRT and Telugu uses Telugu SRT. Both remain internal evaluation media, not authorized for publishing. Failed downloads show an inline message and can be explicitly retried without regenerating speech/video.

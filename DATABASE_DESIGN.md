@@ -1,5 +1,9 @@
 # VideoCraft — V1 Database Design
 
+## F12a deployed slice — completed-video history (22 October 2026)
+
+No new collection, migration or index. Read-only snapshot transactions check active membership/live project and query ready_videos by workspaceId/projectId with versionNumber descending and optional `$lt` cursor boundary, using migration 012's unique ready_video_version_v1 index in reverse. The bounded page fetch is limit+1, maximum 51. latestReadyVideoId determines isLatest independently of completion/version numbering, preserving older late-completion semantics. Failed/new drafts and incomplete generation runs are excluded because only committed ready_videos are listed. Browsing/selecting/downloading never rewrites originals, counters, guards, activity or the latest pointer. Available pins and remote integrity remain authoritative at actual media delivery. There is no cleanup/reuse metadata change in this slice.
+
 ## F11c deployed slice — download reads (21 October 2026)
 
 No schema/index/migration change. Downloads reuse migration 012's immutable ready video and owned MP4/SRT asset pins plus the stored bundle's checksum descriptors. The chosen role must match its exact scoped key, destination and available reference; membership/project and referenceRevision are reread after verified remote retrieval. SRT unavailability does not substitute the MP4 or another subtitle asset. No download counters, leases, reservations, mutation, publication rights or automatic regeneration are introduced.

@@ -119,3 +119,5 @@ F04 implementation reconciliation: UI-03/04 now show real persisted draft cards,
 
 No frontend application pages, database migrations, deployments or live provider integrations were implemented in this design pass.
 F11c: the same finished-video panel adds explicit MP4 and matching-language SRT download buttons beside its evaluation notice. Preparing state prevents duplicate clicks, failures stay inline with explicit retry, and wrapping controls preserve the Midnight Frame layout. No publication action or translated-caption option is added. Ready-state browser downloads on actual generated media remain acceptance work; fixture access/checksum tests do not establish that live flow.
+
+F12a: finished-video panel adds a collapsible completed-video history with refresh, bounded older-page loading, selected/latest labels, safe empty/error states and explicit return to latest. Selection uses the same player/transcript/download controls, preserving the saved plan and latest pointer. Polling stays on the selected historical ID. No new wizard, publication button, timeline or implied speech reuse. Actual ready-media browser acceptance remains pending.
