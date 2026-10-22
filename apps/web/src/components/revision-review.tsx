@@ -28,6 +28,6 @@ export function RevisionReview({plan,enabled}:{plan:PlanPreview;enabled:boolean}
       {result.changes?.sceneOrderChanged&&<p>The scene sequence changed.</p>}
       {!!result.changes?.settingsChanged.length&&<p>Video settings changed: {result.changes.settingsChanged.map(k=>({language:'language',targetSeconds:'duration',voiceCatalogId:'voice',accentId:'accent',brandKitRevisionId:'branding',themeId:'theme',captionStyleId:'caption style'})[k]).join(', ')}.</p>}
       <ul>{result.changes?.scenes.map(s=><li key={s.sceneId}>{s.sceneId.replace('scene_','Scene ')}: {[s.added&&'added',s.removed&&'removed',s.narrationChanged&&'narration and matching subtitles',s.headingChanged&&'heading',s.diagramChanged&&'diagram'].filter(Boolean).join(', ')}.</li>)}</ul>
-    </>}<p className="muted-copy">This comparison uses no AI credits and does not approve a render. New generation currently synthesizes all narration again; audio reuse is not enabled. Check the video plan and explicitly approve it when ready.</p></div>}
+    </>}<p className="muted-copy">This comparison uses no AI credits and does not approve a render. Generation can reuse verified matching narration; changed or unavailable audio is synthesized again. Check the video plan and explicitly approve it when ready.</p></div>}
   </section>;
 }

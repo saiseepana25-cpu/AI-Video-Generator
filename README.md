@@ -1,5 +1,13 @@
 # VideoCraft
 
+## Verified local speech reuse (F12c)
+
+After migration 013 and a worker restart, a newly approved plan can reuse unchanged narration from successful earlier runs in the same project. The worker verifies source approval/model/voice/settings and the actual saved WAV checksum before use. Changed or unavailable clips follow ordinary free-only synthesis. Visual edits can avoid new speech calls; all clips still get fresh measured timing, matching captions and a new render. Earlier ready videos remain available.
+
+Admission still requires full-plan free allowance because reuse is decided during execution. All-reused runs release their unused reservation; mixed runs keep the conservative full settled hold. Revision review reports the reuse policy, not guaranteed savings. Keep output/dashboard-speech and original attempt/approval records: reuse receipts pin their sources, and automatic cleanup is not implemented. Only original settled clips from the latest 20 successful same-project runs are considered; missing local files can require synthesis even if videos are stored in R2.
+
+Stop app/generation/storage writers, then run `npm run web:db:migrate`, `npm run web:db:check`, and rebuild/restart the app. Restart generation with `npm run web:generation -- worker` only when ready to process explicitly approved jobs. A worker start does not authorize new provider usage by itself. No cross-project reuse, paid fallback, automatic speech retry or new publication rights.
+
 ## Review a video revision (F12b)
 
 After saving plan edits, choose **Review video changes** under **What changed?** to compare the saved plan with the latest completed video's approved input. It highlights narration/matching subtitles, headings, diagrams, scene sequence, source brief and supported settings. Before a first video it explains that there is no completed baseline. Your earlier video stays available in the finished-video panel/history.

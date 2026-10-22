@@ -9,6 +9,7 @@ import {canonicalJson, generationHash, RENDER_CONTRACT, validateRenderPlan, type
 import {requiredCapabilities, type Approval, type GenerationRun, type GenerationWorker as WorkerRow, type LocalArtifact, type SpeechAttempt} from './contracts';
 import {GenerationFault, type GenerationEngine, type SpeechClip} from './engine';
 import {closeGenerationReservation} from './reservation';
+import {trySpeechReuse} from './speech-reuse';
 
 const activeStates = ['running', 'cancellation_requested'] as const;
 const safeError = (code: string) => ({code, retryable: false as const, message: code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
@@ -141,6 +142,8 @@ export class GenerationWorker {
       try {
         const clips: SpeechClip[] = [];
         for (const segment of plan.narration) {
+          const reused=await trySpeechReuse(this.client,this.name,this.env,this.engine,run,plan,segment.segmentId,controller.signal,(db,session)=>this.owned(db,session,run));
+          if(reused){clips.push({segmentId:segment.segmentId,text:segment.text,audio:reused,source:{provider:'elevenlabs',model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}});continue;}
           const observation = await this.engine.observe();
           const attempt = await this.beginSpeech(run, plan, segment.segmentId, observation);
           let audio;

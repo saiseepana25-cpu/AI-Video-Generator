@@ -11,7 +11,7 @@ import {requiredCapabilities, type GenerationRun, type SpeechAttempt, type Gener
 import type {PlanVersion} from '../src/server/planning/contracts';
 import type {ProviderControl} from '../src/server/providers/contracts';
 import {digest} from '../src/server/providers/config';
-import {generationHash} from '../src/server/rendering/contract';
+import {generationHash,buildRenderPlan} from '../src/server/rendering/contract';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, testUserId, type Row} from './fixtures/database';
 import {providerEnv, providerFixture} from './fixtures/providers';
 import {pins, renderFixture} from './fixtures/rendering';
@@ -32,6 +32,8 @@ const deferred = <T>() => {let resolve!: (value: T) => void; const promise = new
 class FakeEngine implements GenerationEngine {
   capabilities = requiredCapabilities; build = 'd'.repeat(64); speechCalls = 0; renderCalls = 0; remaining = 10000;
   beforeObservation?: () => Promise<void>; duringSpeech?: () => Promise<MeasuredSpeech>; duringRender?: () => Promise<void>; persistFailure = false; renderFailure = false;
+  reuseEnabled=false; reuseReads=0; duringRead?:()=>Promise<MeasuredSpeech>;
+  readSpeech=async()=>{this.reuseReads++;if(!this.reuseEnabled)throw new Error('missing');return this.duringRead?this.duringRead():audio();};
   inspect = async () => ({rendererBuildHash: this.build, fonts: pins});
   observe = async () => {await this.beforeObservation?.(); return {state: 'enabled' as const, reasonCode: null, languages: ['en', 'te'] as ('en'|'te')[], remaining: this.remaining, periodId: 'test-period'};};
   speech = async () => {this.speechCalls++; return this.duringSpeech ? this.duringSpeech() : audio();};
@@ -42,7 +44,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -58,6 +60,13 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   const approve = () => service.approve(projectId, body(), randomUUID());
   const run = () => db.collection<GenerationRun>('generation_runs').findOne({projectId});
   const provider = () => db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'});
+  async function approveRevision(changeNarration=false){
+    const project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    const edited=await new PlanEditService(client,name,context).edit(planId,{expectedProjectRevision:project.revision.toNumber(),edits:changeNarration?{narration:[{segmentId:'scene_1',text:'Clouds form above rivers.'}]}:{headings:[{sceneId:'scene_1',text:'A clearer diagram'}]}},randomUUID());
+    const current=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    const result=await service.approve(projectId,{expectedProjectRevision:current.revision.toNumber(),planVersionId:edited.plan.id,generationInputHash:generationHash(buildRenderPlan(edited.plan.plan,current.brief,current.settings,pins))},randomUUID());
+    return (await db.collection<GenerationRun>('generation_runs').findOne({_id:result.job.generationRunId}))!;
+  }
   async function cancelCurrent() {const current = (await run())!; return service.cancel(current.jobId, {expectedRevision: current.statusRevision.toNumber()}, randomUUID());}
   test('one worker owns the slot and explicit disabled policy survives expiry/startup', async () => {
     const other = new GenerationWorker(client, name, providerEnv, new FakeEngine()); assert.equal(await other.heartbeat(), false);
@@ -73,6 +82,53 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal((await provider())!.reservations[0].state, 'settled'); assert.ok((await provider())!.reservations[0].units > 0);
     assert.equal((await db.collection<Row>('projects').findOne({_id: projectId}))!.latestRunId, null);
     const view = await service.job(accepted.job.jobId); assert.equal(view!.result, null); assert.equal(JSON.stringify(view).includes('localArtifact'), false); assert.equal(view!.allowedActions.length, 0); await checkDatabase(db);
+  });
+  test('verified speech reuse avoids all new submissions for a visual-only revision and refunds its unused hold',async()=>{
+    await approve();await worker.tick();const first=(await run())!,remaining=(await provider())!.allowance.observedRemaining;
+    engine.reuseEnabled=true;const next=await approveRevision();await worker.tick();
+    const completed=(await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!;
+    assert.equal(completed.state,'rendered_local');assert.equal(completed.submissionCount,0);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,2);
+    const refs=await db.collection<Row>('generation_speech_reuses').find({runId:next._id}).toArray();assert.equal(refs.length,3);assert.ok(refs.every(r=>r.sourceRunId===first._id&&r.sourceAttemptId&&r.audioHash==='e'.repeat(64)));
+    assert.equal(await db.collection('generation_speech_attempts').countDocuments({runId:next._id}),0);
+    assert.equal((await provider())!.allowance.observedRemaining,remaining);assert.equal((await provider())!.reservations.some(r=>r.id===next.reservationId),false);
+    await assert.rejects(db.collection<Row>('generation_speech_reuses').insertOne({...refs[0],_id:randomUUID()}), (e:unknown)=>!!e&&typeof e==='object'&&'code'in e&&e.code===11000);
+  });
+  test('verified speech reuse synthesizes only changed narration and never counts reused phrases as submissions',async()=>{
+    await approve();await worker.tick();engine.reuseEnabled=true;const next=await approveRevision(true);await worker.tick();
+    const completed=(await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!;
+    assert.equal(completed.state,'rendered_local');assert.equal(completed.submissionCount,1);assert.equal(engine.speechCalls,4);
+    assert.equal(await db.collection('generation_speech_reuses').countDocuments({runId:next._id}),2);
+    assert.equal(await db.collection('generation_speech_attempts').countDocuments({runId:next._id,state:'settled'}),1);
+    assert.equal((await provider())!.reservations.find(r=>r.id===next.reservationId)!.state,'settled');
+  });
+  test('missing or corrupt reusable audio follows normal approved synthesis without a false reuse receipt',async()=>{
+    await approve();await worker.tick();const next=await approveRevision();await worker.tick();
+    assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'rendered_local');assert.equal(engine.speechCalls,6);assert.equal(await db.collection('generation_speech_reuses').countDocuments(),0);
+  });
+  test('reuse refuses changed source provider configuration',async()=>{
+    await approve();await worker.tick();const first=(await run())!;engine.reuseEnabled=true;
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:first._id},{$set:{providerConfigHash:'b'.repeat(64)}});
+    const next=await approveRevision();await worker.tick();assert.equal(engine.speechCalls,6);assert.equal(await db.collection('generation_speech_reuses').countDocuments({runId:next._id}),0);
+  });
+  test('reuse never imports speech from a different project even for identical narration',async()=>{
+    await approve();await worker.tick();const first=(await run())!,other=projectFixture();await db.collection<Row>('projects').insertOne(other);engine.reuseEnabled=true;
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:first._id},{$set:{projectId:other._id}});
+    const next=await approveRevision();await worker.tick();assert.equal(engine.speechCalls,6);assert.equal(await db.collection('generation_speech_reuses').countDocuments({runId:next._id}),0);
+  });
+  test('operator disablement during reusable audio retrieval fences reuse and new speech',async()=>{
+    await approve();await worker.tick();engine.reuseEnabled=true;const next=await approveRevision();
+    engine.duringRead=async()=>{await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{operatorDisabled:true,state:'disabled'}});return audio();};
+    await worker.tick();assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'failed');assert.equal(engine.speechCalls,3);assert.equal(await db.collection('generation_speech_reuses').countDocuments(),0);
+  });
+  test('cancellation during reusable audio retrieval wins before reuse receipt or render',async()=>{
+    await approve();await worker.tick();engine.reuseEnabled=true;const next=await approveRevision();
+    engine.duringRead=async()=>{const live=(await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!;await service.cancel(live.jobId,{expectedRevision:live.statusRevision.toNumber()},randomUUID());return audio();};
+    await worker.tick();assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'cancelled');assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);assert.equal(await db.collection('generation_speech_reuses').countDocuments(),0);
+  });
+  test('source settlement changes after retrieval refuse reuse without silently submitting speech',async()=>{
+    await approve();await worker.tick();engine.reuseEnabled=true;const first=(await run())!,next=await approveRevision();
+    engine.duringRead=async()=>{await db.collection<SpeechAttempt>('generation_speech_attempts').updateOne({runId:first._id,segmentId:'segment_scene_1'},{$set:{state:'uncertain'}});return audio();};
+    await worker.tick();assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'failed');assert.equal(engine.speechCalls,3);assert.equal(await db.collection('generation_speech_reuses').countDocuments(),0);
   });
   test('overlapping ticks and competing workers cannot duplicate submissions or local artifacts', async () => {
     await approve(); const secondEngine = new FakeEngine(), second = new GenerationWorker(client, name, providerEnv, secondEngine);
@@ -435,7 +491,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   });
   test('revision review without completed output is read-only and requires fresh current input',async()=>{
     const reviews=new RevisionReviewService(client,name,context),before=await db.collection<Row>('projects').findOne({_id:projectId});
-    const result=await reviews.review(planId);assert.equal(result.baseline,null);assert.equal(result.changes,null);assert.equal(result.speechReuse,false);
+    const result=await reviews.review(planId);assert.equal(result.baseline,null);assert.equal(result.changes,null);assert.equal(result.speechReuse,'verified_clips_only');
     assert.deepEqual(await db.collection<Row>('projects').findOne({_id:projectId}),before);assert.equal(engine.speechCalls,0);
     await db.collection<Row>('projects').updateOne({_id:projectId},{$inc:{briefRevision:Long.ONE}});
     await assert.rejects(reviews.review(planId),/current plan/);
@@ -449,7 +505,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const edited=await new PlanEditService(client,name,context).edit(planId,body,randomUUID());
     const result=await reviews.review(edited.plan.id);assert.equal(result.baseline!.videoId,original._id);assert.equal(result.requiresNewApproval,true);
     assert.deepEqual(result.changes!.scenes.map(s=>[s.sceneId,s.narrationChanged,s.headingChanged]),[['scene_1',true,false],['scene_2',false,true]]);
-    assert.equal(result.speechReuse,false);assert.deepEqual(await db.collection<ReadyVideo>('ready_videos').findOne({_id:original._id}),original);
+    assert.equal(result.speechReuse,'verified_clips_only');assert.deepEqual(await db.collection<ReadyVideo>('ready_videos').findOne({_id:original._id}),original);
     const videos=new VideoService(client,name,context,store);assert.equal((await videos.latest(projectId)).video!.id,original._id);
     assert.equal((await videos.download(original._id,'mp4',null)).status,200);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);
     await assert.rejects(reviews.review(planId),/current plan/);

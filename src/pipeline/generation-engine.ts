@@ -11,6 +11,7 @@ import type {RenderPlan} from './render-contract.js';
 import {renderSelectedVideo, selectedFontAssets, selectedRendererBuildHash} from './selected-renderer.js';
 import {encodeWav} from './wav.js';
 import {binary} from './probe.js';
+import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
   capabilities = [...requiredCapabilities];
@@ -24,6 +25,7 @@ export class LiveGenerationEngine implements GenerationEngine {
   }
   async observe() {try {return await new ProviderGateway(this.env).observe('elevenlabs');} catch {throw new GenerationFault('FREE_SPEECH_UNAVAILABLE');}}
   speech(plan: RenderPlan, segmentId: string, signal: AbortSignal) {return new GenerationSpeechGateway(this.env).synthesize(plan, segmentId, signal);}
+  readSpeech(source: SpeechFile, signal: AbortSignal) {return readVerifiedSpeech(this.root,source,signal);}
   async persistSpeech(runId: string, attemptId: string, audio: MeasuredSpeech) {
     requireProjectId(runId); requireProjectId(attemptId);
     const folder = path.join(this.root, 'output', 'dashboard-speech', runId); await fs.mkdir(folder, {recursive: true});

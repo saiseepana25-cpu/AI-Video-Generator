@@ -38,7 +38,7 @@ export class RevisionReviewService {
       if (project.currentPlanVersionId!==id || !project.briefRevision.equals(version.sourceBriefRevision) || project.planningRequestId!==version.sourcePlanningRequestId || !equal(project.settings,version.settingsSnapshot)
         || digest(JSON.stringify({brief:project.brief,settings:version.settingsSnapshot}))!==version.inputHash) throw new ProjectError('PLAN_OUTDATED',409,'Save and review the current plan for the current brief and settings.');
       if (project.activePlanningJobId||project.latestRunId) throw new ProjectError('REVISION_REVIEW_UNAVAILABLE',409,'Finish active work before comparing a revision.');
-      const identity = {projectId:project._id,planVersionId:id,projectRevision:project.revision.toNumber(),speechReuse:false as const,requiresNewApproval:true as const};
+      const identity = {projectId:project._id,planVersionId:id,projectRevision:project.revision.toNumber(),speechReuse:'verified_clips_only' as const,requiresNewApproval:true as const};
       if (!project.latestReadyVideoId) return {...identity,baseline:null,changes:null};
       const video = await db.collection<ReadyVideo>('ready_videos').findOne({_id:project.latestReadyVideoId,workspaceId:this.context.workspaceId,projectId:project._id},{session});
       const approval = video && await db.collection<Approval>('approvals').findOne({_id:video.approvalId,workspaceId:this.context.workspaceId,projectId:project._id,planVersionId:video.planVersionId,inputHash:video.inputHash},{session});
