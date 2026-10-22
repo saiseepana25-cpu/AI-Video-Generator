@@ -624,6 +624,8 @@ Request `{expectedProjectRevision}`; optionally `conversationThroughSequence` bo
 
 Latest planning request ID + source brief revision guard the resulting current pointer. Newer requests supersede older ones. No result silently overwrites edits or starts rendering. Planning estimates are not final speech timings.
 
+Planning refusal handling (local MVP, 22 October 2026): named WORKER_UNAVAILABLE/503 and FREE_ALLOWANCE_UNAVAILABLE/503 are definitive pre-write admission refusals, after exact receipt replay and before job/receipt creation. The client retains the brief but releases the refused command so editing and retry remain possible. Other 5xx/transport failures and 401 can hide an accepted command and retain its exact key/body for recovery. Refresh availability updates provider metadata; a fresh operator observation of the actual API project's/model's free quota is separately required.
+
 ### API-14 — `POST /api/v1/projects/{projectId}/revisions`
 
 Required `expectedProjectRevision`, exactly one `basePlanVersionId` or `baseVideoVersionId`, and exactly one `changeRequest` or saved `messageId`. Optional settings replacement only when explicitly requested by the user. Example:

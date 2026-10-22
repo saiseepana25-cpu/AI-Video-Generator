@@ -9,6 +9,7 @@ import {PlanHistory} from './plan-history';
 import {PlanReadiness} from './plan-readiness';
 import {GenerationPanel} from './generation-panel';
 import type {RenderCheck} from '@/server/rendering/service';
+import {canCorrectPlanningFailure} from '@/lib/planning-outcome';
 
 type Preview = PlanPreview;
 type Command = {key: string; url: string; body: {expectedProjectRevision?: number; expectedRevision?: number}};
@@ -50,7 +51,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
       sessionStorage.setItem(storageKey, JSON.stringify(next)); setCommand(next); setMessage('');
       const r = await fetch(next.url, {method: 'POST', headers: {'Content-Type': 'application/json', 'Idempotency-Key': next.key}, body: JSON.stringify(next.body), signal: AbortSignal.timeout(20000)});
       const v = await r.json();
-      if (r.status >= 500 || r.status === 401) {setMessage(v.error?.message ?? 'Request outcome unconfirmed. Check the same request.'); return;}
+      if (!r.ok&&!canCorrectPlanningFailure(r.status,v.error?.code)) {setMessage(v.error?.message ?? 'Request outcome unconfirmed. Check the same request.'); return;}
       sessionStorage.removeItem(storageKey); setCommand(null);
       if (!r.ok) {setMessage(v.error?.message ?? 'Could not start planning.'); return;}
       await load();
