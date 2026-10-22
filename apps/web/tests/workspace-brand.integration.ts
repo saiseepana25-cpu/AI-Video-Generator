@@ -7,6 +7,7 @@ import {migrateDatabase,checkDatabase} from '../src/server/db/migrations';
 import {brandCollections} from '../src/server/db/brand-schemas';
 import {BrandService} from '../src/server/brand/service';
 import {SettingsService} from '../src/server/settings/service';
+import {ProjectService} from '../src/server/projects/service';
 import {initialBrand} from '../src/server/brand/validation';
 import {workspaceFixture,membershipFixture,projectFixture,testWorkspaceId,testUserId,type Row} from './fixtures/database';
 const uri=process.env.MONGODB_TEST_URI??'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
@@ -18,6 +19,24 @@ describe('immutable shared branding on an isolated replica set',{concurrency:fal
   beforeEach(async()=>{for(const n of ['workspaces','memberships','workspace_brand_commands','workspace_settings_commands','brand_kits','activity_events','projects'])await db.collection(n).deleteMany({});await db.collection<Row>('workspaces').insertOne(workspaceFixture());await db.collection<Row>('memberships').insertOne(membershipFixture());service=new BrandService(client,name,context);});
   after(async()=>{try{if(!/^videocraft_brand_test_[a-f0-9]{32}$/.test(name))throw new Error('Unsafe cleanup');await db.dropDatabase();}finally{await client.close();}});
   const body=(revision=0)=>({expectedRevision:revision,brandKit:initialBrand});
+  test('projects retain captured palette revisions across workspace changes; foreign/missing refs fail without writes',async()=>{
+    const first=(await service.put(body(),randomUUID())).brand.brandKit!;
+    const projects=new ProjectService(client,name,context,'brand-test-secret'.repeat(3),{});
+    const settings={language:'en' as const,targetSeconds:30 as const,accentId:null,voiceCatalogId:null,brandKitRevisionId:first.id,themeId:initialBrand.themeId,captionStyleId:'readable-default-v1'};
+    const input={idea:'Explain sunlight',settings},key=randomUUID(),old=await projects.create(input,key);
+    await service.put({expectedRevision:1,brandKit:{...initialBrand,primaryColor:'#FFFFFF'}},randomUUID());
+    assert.equal((await projects.get(old.project.id)).settings.brandKitRevisionId,first.id);
+    assert.equal((await projects.create(input,key)).replayed,true);
+    const current=(await service.get()).brandKit!,next=await projects.create({idea:'Explain rivers',settings:{...settings,brandKitRevisionId:current.id}},randomUUID());assert.equal(next.project.settings.brandKitRevisionId,current.id);
+    const foreign={...(await db.collection<Row>('brand_kits').findOne({_id:first.id}))!,_id:randomUUID(),workspaceId:randomUUID()};await db.collection<Row>('brand_kits').insertOne(foreign);
+    for(const id of [foreign._id,randomUUID()]){
+      await assert.rejects(projects.create({idea:'Bad ref',settings:{...settings,brandKitRevisionId:id}},randomUUID()),/unavailable or unsupported/);
+      await assert.rejects(projects.patch(old.project.id,{expectedProjectRevision:1,patch:{settings:{...settings,brandKitRevisionId:id}}},randomUUID()),/unavailable or unsupported/);
+    }
+    assert.equal(await db.collection('projects').countDocuments(),2);
+    const cleared=await projects.patch(old.project.id,{expectedProjectRevision:1,patch:{settings:{...settings,brandKitRevisionId:null}}},randomUUID());assert.equal(cleared.project.settings.brandKitRevisionId,null);
+    await checkDatabase(db);
+  });
   test('empty read performs no brand writes; first save atomically pins revision and receipt/event',async()=>{
     assert.deepEqual(await service.get(),{revision:0,brandKit:null});assert.equal(await db.collection('brand_kits').countDocuments(),0);
     const key=randomUUID(),result=await service.put(body(),key);assert.equal(result.replayed,false);assert.equal(result.brand.revision,1);

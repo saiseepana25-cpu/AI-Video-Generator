@@ -26,7 +26,7 @@ export async function selectedFontAssets(root: string) {
   return {fonts, pins: Object.fromEntries(fonts.map(f => [f.role, sha(f.bytes)])) as FontPins};
 }
 export async function selectedRendererBuildHash(root: string, pins: FontPins) {
-  const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'package-lock.json'];
+  const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'apps/web/src/server/brand/palette.ts', 'package-lock.json'];
   const parts = await Promise.all(files.map(async file => ({file, sha256: sha(await fs.readFile(path.join(root, file)))})));
   return sha(canonicalJson({adapter: 'educational-diagrams-renderer-v1', pins, files: parts}));
 }

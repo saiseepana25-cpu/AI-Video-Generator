@@ -6,6 +6,8 @@ import {fitMeasured, wrapMeasured, computeSelectedLayout} from '../src/video/sel
 import {selectedFixture} from '../fixtures/selected-diagrams.js';
 import {renderSelectedVideo, selectedFontAssets, selectedRendererBuildHash} from '../src/pipeline/selected-renderer.js';
 import type {SelectedClip, SelectedVideoProps} from '../src/pipeline/selected-types.js';
+import {initialBrand} from '../apps/web/src/server/brand/palette';
+import {randomUUID} from 'node:crypto';
 
 const pins = {heading: 'a'.repeat(64), body: 'b'.repeat(64), telugu: 'c'.repeat(64)};
 const setup = (language: 'en' | 'te' = 'en') => {
@@ -13,6 +15,17 @@ const setup = (language: 'en' | 'te' = 'en') => {
   const clips: SelectedClip[] = plan.narration.map(n => ({segmentId: n.segmentId, text: n.text, source: {provider: 'offline-diagnostic', model: 'espeak', voiceId: language}, audio: {sampleRate: 24000, samples: Float32Array.from({length: 24000}, (_, i) => Math.sin(i / 10) * .2)}}));
   return {plan, clips, hash: generationHash(plan)};
 };
+
+test('branded English/Telugu timelines retain approved colors and reject an unbranded approval hash',()=>{
+  for(const language of ['en','te'] as const){
+    const {clips,hash}=setup(language),f=selectedFixture(language),id=randomUUID();
+    const plan=buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins,{...initialBrand,revisionId:id,backgroundColor:'#F5F3EB',primaryColor:'#3660D9',secondaryColor:'#173342'});
+    assert.throws(()=>assembleSelected(plan,hash,clips,'offline-diagnostic'),/hash/);
+    const timeline=assembleSelected(plan,generationHash(plan),clips,'offline-diagnostic');
+    assert.equal(timeline.plan.settingsSnapshot.brand.colors.canvas,'#F5F3EB');assert.equal(timeline.plan.settingsSnapshot.brand.colors.text,'#000000');assert.equal(timeline.plan.settingsSnapshot.brand.revisionId,id);assert.equal(timeline.durationInFrames,900);
+    assert.equal(canonicalJson(timeline.plan),canonicalJson(plan));
+  }
+});
 test('English/Telugu measured timelines preserve approved text/IDs, exact source samples, phrase anchors and duration cap', () => {
   for (const language of ['en', 'te'] as const) {
     const {plan, clips, hash} = setup(language), t = assembleSelected(plan, hash, clips, 'offline-diagnostic');

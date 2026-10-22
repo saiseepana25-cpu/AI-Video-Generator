@@ -15,6 +15,9 @@ import {providerEnv, providerFixture} from './fixtures/providers';
 import type {ProviderControl} from '../src/server/providers/contracts';
 import {digest} from '../src/server/providers/config';
 import {PlanEditService} from '../src/server/planning/plan-edit-service';
+import {BrandService} from '../src/server/brand/service';
+import {initialBrand} from '../src/server/brand/palette';
+import {brandPaletteCapability} from '../src/server/generation/contracts';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -33,7 +36,7 @@ describe('exact reviewed-input admission and queued cancellation', {concurrency:
   }
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const collection of ['generation_runs', 'generation_commands', 'generation_workers', 'approvals', 'plan_versions', 'plan_edit_commands', 'projects', 'workspaces', 'memberships', 'activity_events', 'provider_controls']) await db.collection(collection).deleteMany({});
+    for (const collection of ['generation_runs', 'generation_commands', 'generation_workers', 'approvals', 'plan_versions', 'plan_edit_commands', 'projects', 'workspaces', 'memberships', 'activity_events', 'provider_controls','brand_kits','workspace_brand_commands']) await db.collection(collection).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const speech = providerFixture(); speech.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(speech);
     const now = new Date(), f = renderFixture();
@@ -46,6 +49,35 @@ describe('exact reviewed-input admission and queued cancellation', {concurrency:
   const body = () => ({expectedProjectRevision: 1, planVersionId: version._id, generationInputHash: generationHash(renderFixture(version.plan.language).plan)});
   const speech = () => db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'});
   const approve = () => service.approve(projectId, body(), randomUUID());
+
+  test('captured brand compiles and approves unchanged after workspace brand edits; canonical approval stays pinned',async()=>{
+    const brands=new BrandService(client,name,context),first=(await brands.put({expectedRevision:0,brandKit:{...initialBrand,backgroundColor:'#F5F3EB',primaryColor:'#3660D9',secondaryColor:'#173342'}},randomUUID())).brand.brandKit!;
+    version.settingsSnapshot={...version.settingsSnapshot,brandKitRevisionId:first.id};
+    const project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    version.inputHash=digest(JSON.stringify({brief:project.brief,settings:version.settingsSnapshot}));
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{settings:version.settingsSnapshot}});
+    await db.collection<PlanVersion>('plan_versions').replaceOne({_id:version._id},version);
+    const checker=new RenderInputService(client,name,context,providerEnv,async()=>pins),blocked=await checker.check(version._id);
+    assert.equal(blocked.canGenerate,false);assert.equal(blocked.summary!.brand.revisionId,first.id);
+    await db.collection<GenerationWorker>('generation_workers').updateOne({_id:'generation:local'},{$set:{capabilities:[...requiredCapabilities,brandPaletteCapability]}});
+    const checked=await checker.check(version._id);assert.equal(checked.canGenerate,true);assert.equal(checked.summary!.brand.colors.text,'#000000');
+    await brands.put({expectedRevision:1,brandKit:initialBrand},randomUUID());
+    assert.equal((await checker.check(version._id)).generationInputHash,checked.generationInputHash);
+    const key=randomUUID(),input={expectedProjectRevision:1,planVersionId:version._id,generationInputHash:checked.generationInputHash!},result=await service.approve(projectId,input,key);
+    const run=(await db.collection<GenerationRun>('generation_runs').findOne({_id:result.job.generationRunId}))!,approval=(await db.collection<Approval>('approvals').findOne({_id:run.approvalId}))!;
+    const snapshot=validateRenderPlan(JSON.parse(approval.inputCanonical));assert.equal(snapshot.settingsSnapshot.brand.revisionId,first.id);assert.equal(snapshot.settingsSnapshot.brand.colors.canvas,'#F5F3EB');
+    await brands.put({expectedRevision:2,brandKit:{...initialBrand,primaryColor:'#FFFFFF'}},randomUUID());
+    assert.equal((await db.collection<Approval>('approvals').findOne({_id:approval._id}))!.inputCanonical,approval.inputCanonical);
+    assert.equal((await service.approve(projectId,input,key)).replayed,true);assert.equal((await speech())!.reservations.length,1);await checkDatabase(db);
+  });
+
+  test('missing captured brand cannot be checked or approved and consumes no speech allowance',async()=>{
+    version.settingsSnapshot={...version.settingsSnapshot,brandKitRevisionId:randomUUID()};
+    const project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    version.inputHash=digest(JSON.stringify({brief:project.brief,settings:version.settingsSnapshot}));await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{settings:version.settingsSnapshot}});await db.collection<PlanVersion>('plan_versions').replaceOne({_id:version._id},version);
+    await assert.rejects(new RenderInputService(client,name,context,providerEnv,async()=>pins).check(version._id),/brand palette is unavailable/);
+    await assert.rejects(approve(),/brand palette is unavailable/);assert.equal((await speech())!.reservations.length,0);assert.equal(await db.collection('approvals').countDocuments(),0);
+  });
 
   test('English and Telugu approvals persist exact immutable canonical content, pins, one run/job and net reservation atomically', async () => {
     for (const language of ['en', 'te'] as const) {

@@ -47,7 +47,7 @@ export const SelectedDiagrams: React.FC<SelectedVideoProps> = props => {
   const progress = Math.max(0, Math.min(1, frame / props.durationInFrames));
   return <AbsoluteFill style={{background: colors.canvas, color: colors.text, fontFamily: family(plan.language, 'body')}}>
     <Audio src={staticFile(props.audioFile)}/>
-    <div style={{position: 'absolute', left: 72, right: 72, top: 160, color: colors.accent}}><Block layout={props.layout.title} language={plan.language} role="heading"/></div>
+    <div style={{position: 'absolute', left: 72, right: 72, top: 160, color: plan.settingsSnapshot.brand.revisionId?colors.text:colors.accent}}><Block layout={props.layout.title} language={plan.language} role="heading"/></div>
     <div style={{position: 'absolute', top: 374, left: 72, right: 72}}><Block layout={layout.heading} language={plan.language} role="heading"/></div>
     <svg width="1080" height="1920" viewBox="0 0 1080 1920" style={{position: 'absolute', inset: 0}} aria-label={scene.templateId}>
       <defs><marker id="vc-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill={colors.secondary}/></marker></defs>
@@ -66,7 +66,7 @@ export const SelectedDiagrams: React.FC<SelectedVideoProps> = props => {
       opacity: reveal, transform: `translateY(${(1 - reveal) * 14}px)`}}><Block layout={layout.labels[i]} language={plan.language} centered/></div>)}
     {frame >= cue.startFrame && frame < cue.endFrame && <div style={{position: 'absolute', left: 72, right: 72, top: 1480, height: 194, padding: '16px 28px', borderRadius: 24,
       boxSizing: 'border-box', border: `1px solid ${colors.accent}`, background: colors.surface, display: 'flex', justifyContent: 'center', alignItems: 'center'}}><Block layout={layout.caption} language={plan.language} centered/></div>}
-    {props.mode === 'offline-diagnostic' && <div style={{position: 'absolute', left: 72, top: 344, fontSize: 20, color: colors.secondary}}>eSpeak · {plan.language === 'te' ? 'ఆఫ్‌లైన్ పరీక్ష' : 'OFFLINE DIAGNOSTIC'}</div>}
+    {props.mode === 'offline-diagnostic' && <div style={{position: 'absolute', left: 72, top: 344, fontSize: 20, color: plan.settingsSnapshot.brand.revisionId?colors.text:colors.secondary}}>eSpeak · {plan.language === 'te' ? 'ఆఫ్‌లైన్ పరీక్ష' : 'OFFLINE DIAGNOSTIC'}</div>}
     <div style={{position: 'absolute', left: 72, right: 72, top: 1440, height: 4, background: colors.surface}}><div style={{height: 4, width: `${progress * 100}%`, background: colors.secondary}}/></div>
   </AbsoluteFill>;
 };

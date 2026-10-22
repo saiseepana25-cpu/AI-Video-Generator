@@ -364,6 +364,12 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 @media (max-width: 760px) { .workspace-settings-panel { padding: 20px; } .workspace-settings-grid { grid-template-columns: minmax(0,1fr); gap: 0; } }
 .video-downloads { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
 .brand-panel { margin-top: 28px; }
+.composer-brand-choice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 44px; margin: 0 0 20px; }
+.composer-brand-choice input { width: 20px; height: 20px; accent-color: var(--primary); }
+.composer-brand-choice .muted-copy { flex-basis: 100%; margin-top: 0; }
+.brand-check-swatches { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; font-size: 12px; }
+.brand-check-swatches span { display: inline-flex; align-items: center; gap: 6px; }
+.brand-check-swatches i { display: inline-block; height: 20px; width: 20px; border-radius: 4px; border: 1px solid #7B8498; }
 .brand-color-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
 .brand-color-field > div { display: flex; gap: 8px; }
 .brand-color-field input[type=color] { width: 48px; flex-shrink: 0; padding: 4px; cursor: pointer; }

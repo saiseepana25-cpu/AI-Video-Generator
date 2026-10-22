@@ -38,7 +38,7 @@ export function parseProjectInput(value: unknown): ProjectInput {
   if (![30, 60, 90].includes(selected.targetSeconds as number)) fail('/settings/targetSeconds', 'Choose 30, 60 or 90 seconds.');
   const accentId = unresolved(selected.accentId, '/settings/accentId');
   const voiceCatalogId = unresolved(selected.voiceCatalogId, '/settings/voiceCatalogId');
-  if (selected.brandKitRevisionId !== null) fail('/settings/brandKitRevisionId', 'Brand kits are not available yet.');
+  if (selected.brandKitRevisionId !== null && (typeof selected.brandKitRevisionId!=='string'||!uuidPattern.test(selected.brandKitRevisionId))) fail('/settings/brandKitRevisionId', 'Choose a saved brand revision or no branding.');
   if (selected.themeId !== 'clean-educational-v1') fail('/settings/themeId', 'Use the supported educational theme.');
   if (selected.captionStyleId !== 'readable-default-v1') fail('/settings/captionStyleId', 'Use the supported caption style.');
   const references: ProjectInput['references'] = [];
@@ -65,7 +65,7 @@ export function parseProjectInput(value: unknown): ProjectInput {
   }
   return {idea, displayTitle, audience, references, settings: {
     language: selected.language, targetSeconds: selected.targetSeconds as 30 | 60 | 90, accentId, voiceCatalogId,
-    brandKitRevisionId: null, themeId: selected.themeId, captionStyleId: selected.captionStyleId,
+    brandKitRevisionId: selected.brandKitRevisionId as string|null, themeId: selected.themeId, captionStyleId: selected.captionStyleId,
   }};
 }
 

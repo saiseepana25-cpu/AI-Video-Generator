@@ -14,6 +14,7 @@ import {digest, providerConfig} from '../providers/config';
 import type {Env, ProviderControl} from '../providers/contracts';
 import {loadFontPins} from '../rendering/assets';
 import {buildRenderPlan, canonicalJson, generationHash, type FontPins} from '../rendering/contract';
+import {readBrandSelection} from '../brand/selection';
 import {RenderInputService} from '../rendering/service';
 import {compatibleWorker, readGenerationWorker, workerUnavailable} from './capability';
 import {generationView, type Approval, type GenerationRun, type GenerationView, type GenerationWorker} from './contracts';
@@ -106,7 +107,8 @@ export class GenerationService {
       if (project.activePlanningJobId || project.latestRunId) throw fail('GENERATION_IN_PROGRESS', 409, 'Finish or cancel the active work before approving a video.');
       if (project.revision.toNumber() >= Number.MAX_SAFE_INTEGER) throw fail('REVISION_LIMIT', 409, 'This project has reached its revision limit.');
       if (digest(JSON.stringify({brief: project.brief, settings: version.settingsSnapshot})) !== version.inputHash) throw fail('PLAN_SOURCE_MISMATCH', 409, 'Prepare a new plan for the current source.');
-      const plan = buildRenderPlan(version.plan, project.brief, version.settingsSnapshot, pins), hash = generationHash(plan);
+      const brand=await readBrandSelection(db,session,this.context.workspaceId,version.settingsSnapshot.brandKitRevisionId);
+      const plan = buildRenderPlan(version.plan, project.brief, version.settingsSnapshot, pins,brand), hash = generationHash(plan);
       if (hash !== input.generationInputHash) throw fail('PLAN_INPUT_CHANGED', 409, 'The video input changed. Review it before approval.');
       const now = new Date(), worker = await readGenerationWorker(db, session);
       if (!compatibleWorker(worker, plan, now)) throw fail(workerUnavailable.code, 503, workerUnavailable.message);

@@ -4,7 +4,9 @@ import {randomUUID} from 'node:crypto';
 import {Long} from 'mongodb';
 import {approvalInput, recoverGenerationCommand} from '../src/lib/generation-command';
 import {compatibleWorker} from '../src/server/generation/capability';
-import {requiredCapabilities, type GenerationWorker} from '../src/server/generation/contracts';
+import {brandPaletteCapability,requiredCapabilities, type GenerationWorker} from '../src/server/generation/contracts';
+import {buildRenderPlan} from '../src/server/rendering/contract';
+import {initialBrand} from '../src/server/brand/palette';
 import {pins, renderFixture} from './fixtures/rendering';
 
 test('generation recovery preserves exact reviewed input and original request key, rejects cross-project/malformed commands', () => {
@@ -24,6 +26,9 @@ test('worker gate requires fresh healthy exact contract, timing, fonts and capab
   const worker: GenerationWorker = {_id: 'generation:local', owner: randomUUID(), revision: Long.ONE, state: 'healthy', contract: plan.contract,
     compilerVersion: plan.settingsSnapshot.compilerVersion, rendererBuildHash: 'd'.repeat(64), capabilities: requiredCapabilities, fonts: pins, heartbeatAt: now, expiresAt: new Date(now.getTime() + 30000)};
   assert.equal(compatibleWorker(worker, plan, now), true);
+  const f=renderFixture(),id=randomUUID(),branded=buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins,{...initialBrand,revisionId:id});
+  assert.equal(compatibleWorker(worker,branded,now),false);
+  assert.equal(compatibleWorker({...worker,capabilities:[...requiredCapabilities,brandPaletteCapability]},branded,now),true);
   for (const change of [{state: 'disabled' as const}, {state: 'draining' as const}, {contract: 'other'}, {compilerVersion: 'other'}, {capabilities: []}, {fonts: {...pins, body: 'd'.repeat(64)}}, {heartbeatAt: new Date(now.getTime() - 31000)}, {heartbeatAt: new Date(now.getTime() + 10000)}, {expiresAt: now}]) assert.equal(compatibleWorker({...worker, ...change}, plan, now), false);
   assert.equal(compatibleWorker(null, plan, now), false);
 });

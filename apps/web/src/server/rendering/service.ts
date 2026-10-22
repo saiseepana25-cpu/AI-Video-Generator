@@ -10,6 +10,7 @@ import type {Env, ProviderControl} from '../providers/contracts';
 import {buildRenderPlan, generationHash, RenderInputError, type FontPins} from './contract';
 import {loadFontPins} from './assets';
 import {compatibleWorker, readGenerationWorker, workerUnavailable} from '../generation/capability';
+import {readBrandSelection} from '../brand/selection';
 
 export class RenderInputService {
   constructor(private client: MongoClient, private name: string, private context: ProjectContext, private env: Env, private assets: () => Promise<FontPins> = loadFontPins) {}
@@ -27,14 +28,15 @@ export class RenderInputService {
       if (project.activePlanningJobId || project.latestRunId) throw new ProjectError('PLAN_CHECK_UNAVAILABLE', 409, 'Finish active work before checking a new video input.');
       if (digest(JSON.stringify({brief: project.brief, settings: version.settingsSnapshot})) !== version.inputHash) throw new ProjectError('PLAN_SOURCE_MISMATCH', 409, 'The saved source does not match this plan. Prepare a new plan before generation.');
       const provider = await db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'}, {session});
-      return {version, project, provider};
+      const brand=await readBrandSelection(db,session,this.context.workspaceId,version.settingsSnapshot.brandKitRevisionId);
+      return {version, project, provider,brand};
     });
-    const {version, project, provider} = snapshot;
+    const {version, project, provider,brand} = snapshot;
     let pins;
     try {pins = await this.assets();}
     catch {throw new ProjectError('RENDER_ASSETS_UNAVAILABLE', 503, 'The local video fonts could not be verified. Restore the installed assets and check again.');}
     let plan;
-    try {plan = buildRenderPlan(version.plan, project.brief, version.settingsSnapshot, pins);}
+    try {plan = buildRenderPlan(version.plan, project.brief, version.settingsSnapshot, pins,brand);}
     catch (error) {
       const issue = error instanceof RenderInputError ? {code: error.code, message: error.message} : {code: 'INVALID_RENDER_INPUT', message: 'The saved plan has unsupported content. Review or prepare a new plan.'};
       return {version, projectRevision: project.revision.toNumber(), plan: null, generationInputHash: null, issues: [issue], executionBlocks: []};
@@ -58,7 +60,7 @@ export class RenderInputService {
       summary: plan ? {language: plan.language, captionLanguage: plan.settingsSnapshot.captionLanguage, targetSeconds: plan.targetSeconds,
         sceneCount: plan.scenes.length, segmentCount: plan.narration.length, templates: [...new Set(plan.scenes.map(s => s.templateId))],
         voice: {catalogId: plan.settingsSnapshot.voiceCatalogId, accentId: plan.settingsSnapshot.accentId, model: plan.settingsSnapshot.speech.model},
-        output: plan.settingsSnapshot.output, usagePolicy: plan.settingsSnapshot.usagePolicy, contract: plan.contract, fonts: plan.settingsSnapshot.brand.fonts,
+        output: plan.settingsSnapshot.output, usagePolicy: plan.settingsSnapshot.usagePolicy, contract: plan.contract, fonts: plan.settingsSnapshot.brand.fonts,brand:{revisionId:plan.settingsSnapshot.brand.revisionId,colors:plan.settingsSnapshot.brand.colors},
         timing: 'Measured speech is required before final subtitle and animation timing.'} : null};
   }
 }

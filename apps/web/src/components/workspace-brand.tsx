@@ -24,7 +24,7 @@ export function WorkspaceBrand({workspaceId,userId}:{workspaceId:string;userId:s
     try{const response=await fetch('/api/v1/workspace/brand',{method:'PUT',headers:{'Content-Type':'application/json','Idempotency-Key':next.key},body:JSON.stringify(next.body),signal:AbortSignal.timeout(20000)});const result=await response.json();
       if(!response.ok){if(!canCorrectSaveFailure(response.status,result.error?.code)){setError('Save outcome is unconfirmed. Reconnect or sign in again, then check the same save.');return;}
         sessionStorage.removeItem(scope);setCommand(null);setConflict(response.status===409);setError(result.error?.message??'Check your palette and try again.');return;}
-      sessionStorage.removeItem(scope);setCommand(null);setValue(result.data);setDraft(editableBrandPalette(result.data.brandKit));await load();setMessage('Brand save confirmed. Previous revisions are preserved. Video rendering still uses its approved default palette.');
+      sessionStorage.removeItem(scope);setCommand(null);setValue(result.data);setDraft(editableBrandPalette(result.data.brandKit));await load();setMessage('Brand save confirmed. New projects can capture this palette. Existing projects and approved videos keep their saved colors.');
     }catch{setError('Save outcome is unconfirmed. Reconnect and check the same save.');}
     finally{busy.current=false;setSending(false);}
   }
@@ -32,7 +32,7 @@ export function WorkspaceBrand({workspaceId,userId}:{workspaceId:string;userId:s
   const preview=colorsValid?draft:initialBrand,text=brandTextColor(preview.backgroundColor);
   return <form className="draft-editor workspace-settings workspace-brand" onSubmit={save} aria-label="Shared brand palette" aria-busy={sending||loading}>
     <span className="section-index">YOUR TEAM’S VISUAL SIGNATURE</span><h2>Make the explanation feel like you.</h2>
-    <p className="muted-copy">Save a shared palette and preview English and Telugu diagrams. This step prepares your brand; applying it to generated videos and logo uploads are coming next.</p>
+    <p className="muted-copy">Save a shared palette for new projects. English and Telugu videos use the captured colors; existing projects keep their palette. Logo uploads are coming next.</p>
     {(loading||!checked)&&<p role="status">Loading shared branding…</p>}{error&&<p role="alert" className="form-error">{error}</p>}{message&&<p role="status">{message}</p>}
     {value&&<><fieldset disabled={!checked||sending||loading||!!command}><legend className="sr-only">Brand colors</legend>
       <div className="brand-color-grid">{([['primaryColor','Primary diagram color'],['secondaryColor','Secondary diagram color'],['backgroundColor','Video background']] as const).map(([key,label])=><div className="brand-color-field" key={key}><label htmlFor={`brand-${key}`}>{label}</label><div><input type="color" aria-label={`Pick ${label.toLowerCase()}`} value={isColor(draft[key])?draft[key]:initialBrand[key]} onChange={e=>setDraft({...draft,[key]:e.target.value})}/><input id={`brand-${key}`} value={draft[key]} maxLength={7} spellCheck={false} autoComplete="off" onChange={e=>{setDraft({...draft,[key]:e.target.value});setMessage('');}} aria-describedby="brand-color-help"/></div></div>)}</div>

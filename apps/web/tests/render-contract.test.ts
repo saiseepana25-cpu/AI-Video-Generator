@@ -4,6 +4,26 @@ import {buildRenderPlan, canonicalJson, generationHash, validateRenderPlan} from
 import {loadFontPins} from '../src/server/rendering/assets';
 import {pins, renderFixture} from './fixtures/rendering';
 import {applyTextEdits, parseTextEdits} from '../src/server/planning/text-edits';
+import {initialBrand,contrast} from '../src/server/brand/palette';
+import {randomUUID} from 'node:crypto';
+import {speechIdentity} from '../src/server/generation/speech-identity';
+
+test('brand snapshots round-trip English/Telugu, pin exact colors and change approval hash without changing speech identity',()=>{
+  for(const language of ['en','te'] as const){
+    const f=renderFixture(language),id=randomUUID(),brand={...initialBrand,revisionId:id,backgroundColor:'#F5F3EB',primaryColor:'#3660D9',secondaryColor:'#173342'};
+    const plan=buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins,brand);
+    assert.deepEqual(validateRenderPlan(plan),plan);assert.notEqual(generationHash(plan),generationHash(f.plan));
+    assert.deepEqual(plan.settingsSnapshot.brand.colors,{canvas:brand.backgroundColor,surface:brand.backgroundColor,text:'#000000',accent:brand.primaryColor,secondary:brand.secondaryColor});
+    assert.ok(contrast(plan.settingsSnapshot.brand.colors.text,brand.backgroundColor)>=4.5);
+    assert.equal(speechIdentity('workspace','project',plan,'segment_scene_1'),speechIdentity('workspace','project',f.plan,'segment_scene_1'));
+    const changed=buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins,{...brand,primaryColor:'#173342'});
+    assert.notEqual(generationHash(changed),generationHash(plan));
+    for(const change of [(p:typeof plan)=>{p.settingsSnapshot.brand.colors.text='#FFFFFF';},(p:typeof plan)=>{p.settingsSnapshot.brand.colors.surface='#FFFFFF';},(p:typeof plan)=>{p.settingsSnapshot.brand.colors.accent=brand.backgroundColor;},(p:typeof plan)=>{p.settingsSnapshot.brand.revisionId=null;},(p:typeof plan)=>{p.settingsSnapshot.brand.fonts[1].id='external-font';}]){const invalid=structuredClone(plan);change(invalid);assert.throws(()=>validateRenderPlan(invalid));}
+    assert.throws(()=>buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins));
+    assert.throws(()=>buildRenderPlan(f.proposal,f.brief,f.settings,pins,brand));
+    assert.throws(()=>buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:randomUUID()},pins,brand));
+  }
+});
 
 test('editor-supported narration whitespace compiles with exact matching captions in both languages', () => {
   for (const language of ['en', 'te'] as const) {

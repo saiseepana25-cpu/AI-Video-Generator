@@ -312,3 +312,5 @@ Run the two matching-language outputs with a real free-tier Gemini key, review v
 ## Dependency notices
 
 Remotion has its own organization-based license. The offline speech engine is [eSpeak NG](https://github.com/espeak-ng/espeak-ng) through [Echogarden's Emscripten build](https://github.com/echogarden-project/espeak-ng-emscripten), GPL-3.0. Fontsource Noto fonts are distributed with their upstream font licenses in the installed packages. This local diagnostic adapter is not a decision to ship that dependency in the public product.
+
+F13b2 palette rendering: New projects can capture the saved shared palette (or opt out). Existing and recovered drafts retain their captured settings. Exact colors and font pins enter the separately approved video input; changing team branding does not change older projects or outputs. Branded jobs require a restarted worker advertising render:brand-palette-v1. Logos are a later increment. Root offline diagnostic renders remain separate from dashboard-ready neural videos and require no speech/inference provider calls. See PROJECT_STATUS.md for actual verification and pending live acceptance.

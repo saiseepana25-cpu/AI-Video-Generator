@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {ProviderGateway} from '../../apps/web/src/server/providers/gateway';
 import {GenerationSpeechGateway} from '../../apps/web/src/server/generation/speech-gateway';
 import {GenerationFault, type GenerationEngine, type MeasuredSpeech, type SpeechClip} from '../../apps/web/src/server/generation/engine';
-import {requiredCapabilities} from '../../apps/web/src/server/generation/contracts';
+import {brandPaletteCapability,requiredCapabilities} from '../../apps/web/src/server/generation/contracts';
 import {requireProjectId} from '../../apps/web/src/server/projects/contracts';
 import type {Env} from '../../apps/web/src/server/providers/contracts';
 import type {RenderPlan} from './render-contract.js';
@@ -14,7 +14,7 @@ import {binary} from './probe.js';
 import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
-  capabilities = [...requiredCapabilities];
+  capabilities = [...requiredCapabilities,brandPaletteCapability];
   constructor(private root: string, private env: Env) {}
   async inspect() {
     if (this.env.REMOTION_FREE_LICENSE_CONFIRMED !== 'true' || !this.env.ELEVENLABS_API_KEY?.trim()) throw new GenerationFault('GENERATION_CONFIGURATION_REQUIRED');

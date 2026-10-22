@@ -4,6 +4,17 @@ import {randomUUID} from 'node:crypto';
 import {initialBrand,parseBrandPut,contrast,brandTextColor} from '../src/server/brand/validation';
 import {editableBrandPalette,recoverBrandCommand} from '../src/lib/brand-command';
 import type {BrandView} from '../src/server/brand/service';
+import {composerBody,composerBrandValid,defaultComposerSettings} from '../src/lib/composer-settings';
+
+test('new composers capture a brand revision while old recovered pending bodies retain null branding',()=>{
+  const id=randomUUID(),defaults={language:'en' as const,targetSeconds:60 as const,preferredVoiceCatalogId:null,preferredAccentId:null,themeId:initialBrand.themeId,captionStyleId:'readable-default-v1'};
+  assert.equal(defaultComposerSettings(defaults,'te',id).brandKitRevisionId,id);
+  const legacy={idea:'Water',language:'en' as const,seconds:60 as const};
+  const oldBody=JSON.stringify({idea:'Water',settings:{language:'en',targetSeconds:60,accentId:null,voiceCatalogId:null,brandKitRevisionId:null,themeId:'clean-educational-v1',captionStyleId:'readable-default-v1'}});
+  assert.equal(composerBody(legacy),oldBody);assert.ok(composerBrandValid(legacy));assert.ok(composerBrandValid({...legacy,brandKitRevisionId:id}));assert.equal(composerBrandValid({...legacy,brandKitRevisionId:'invalid'}),false);
+  assert.equal(JSON.parse(composerBody({...legacy,brandKitRevisionId:id})).settings.brandKitRevisionId,id);
+  assert.equal(JSON.parse(composerBody({...legacy,brandKitRevisionId:null})).settings.brandKitRevisionId,null);
+});
 
 test('loaded and confirmed brand revisions can be edited and saved without response metadata',()=>{
   const loaded:BrandView={revision:1,brandKit:{...initialBrand,id:randomUUID(),revision:1,createdAt:'2026-10-22T00:00:00.000Z',createdBy:{id:'0123456789abcdef01234567'}}};

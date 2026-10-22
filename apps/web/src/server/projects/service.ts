@@ -2,6 +2,7 @@ import {createHash, randomUUID} from 'node:crypto';
 import {Long, ObjectId, type ClientSession, type Db, type Document, type MongoClient} from 'mongodb';
 import {databaseTransaction} from '../db/transactions';
 import {assertVoiceSelection} from '../providers/catalog';
+import {readBrandSelection} from '../brand/selection';
 import type {Env} from '../providers/contracts';
 import type {Job} from '../planning/contracts';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
@@ -117,6 +118,7 @@ export class ProjectService {
         await this.authorize(db, session);
         const existing = await replay(db, session);
         if (existing) return existing;
+        await readBrandSelection(db,session,this.context.workspaceId,input.settings.brandKitRevisionId);
         await assertVoiceSelection(db, input.settings, this.providerEnv, session);
         // TTL is asynchronous. Expired receipts cannot block a new logical action.
         await db.collection('idempotency_records').deleteOne({...identity, expiresAt: {$lte: now}}, {session});
@@ -177,7 +179,7 @@ export class ProjectService {
         const changed = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
         let saved = row;
         if (changed) {
-          if (JSON.stringify(settings) !== JSON.stringify(row.settings)) await assertVoiceSelection(db, settings, this.providerEnv, session);
+          if (JSON.stringify(settings) !== JSON.stringify(row.settings)) {await readBrandSelection(db,session,this.context.workspaceId,settings.brandKitRevisionId);await assertVoiceSelection(db, settings, this.providerEnv, session);}
           if (['latestRunId', 'latestReadyVideoId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing generated projects is not available yet.');
           if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
           const updated = await db.collection<ProjectRecord>('projects').findOneAndUpdate({...filter, revision: Long.fromNumber(input.expectedProjectRevision)}, {
