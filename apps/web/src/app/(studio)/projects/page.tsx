@@ -24,7 +24,7 @@ export default async function ProjectsPage({searchParams}: {searchParams: Promis
     data = await projectServiceForContext(context).list(options);
   } catch (cause) {if (cause instanceof ProjectError && cause.status === 400) error = cause.message; else throw cause;}
   const defaults = context.workspace.defaults;
-  const initialSettings=defaultComposerSettings(defaults,context.member.preferences.language??defaults.language,context.workspace.brandKitRevisionId);
+  const initialSettings=defaultComposerSettings(defaults,context.member.preferences.language??defaults.language,context.workspace.brandKitRevisionId,context.member.preferences);
   return <>
     <PageHeading eyebrow="YOUR CREATIVE SPACE" title="Make your next idea move." description="Turn a simple concept into an explainer worth watching." action={<a href="#idea" className="button button--primary"><Icon name="plus"/>New project</a>}/>
     <Panel className="idea-panel" aria-labelledby="idea-heading"><div className="idea-intro"><span className="section-index">01 / THE STARTING POINT</span><h2 id="idea-heading">What would you like to explain?</h2><p>A curious question. A useful lesson. An idea that deserves a little clarity.</p></div><ProjectComposer workspaceId={context.workspace._id} userId={context.identity.userId} defaultLanguage={initialSettings.language} defaultSeconds={initialSettings.targetSeconds} defaultVoice={initialSettings.voiceCatalogId} defaultAccent={initialSettings.accentId} defaultBrand={initialSettings.brandKitRevisionId}/></Panel>

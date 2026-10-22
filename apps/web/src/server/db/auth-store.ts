@@ -10,7 +10,7 @@ export {mongoClient} from './connection';
 export type Membership = {
   _id: string; schemaVersion: 1; workspaceId: string; userId: string; normalizedEmail: string;
   status: 'active' | 'disabled'; joinedAt: Date; disabledAt: Date | null; disabledBy: unknown;
-  preferences: {language: 'en' | 'te' | null; voiceCatalogId: string | null; timezone: string | null};
+  preferences: {language: 'en' | 'te' | null; voiceCatalogId: string | null; accentId?:string|null; timezone: string | null};
   preferencesRevision: Long; activityReadThroughSequence: Long; createdAt: Date; updatedAt: Date;
 };
 export type Workspace = {

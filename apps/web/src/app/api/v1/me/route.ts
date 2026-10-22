@@ -1,3 +1,4 @@
+import {preferenceView} from '@/server/preferences/service';
 import {workspaceContext} from '@/server/auth/context';
 import {dataResponse,authErrorResponse} from '@/server/http/envelope';
 
@@ -13,7 +14,7 @@ export async function GET() {
     return dataResponse({
       user:{id:identity.userId,name:identity.name,email:identity.email},
       workspace:{id:workspace._id,name:workspace.name,timezone:workspace.timezone},
-      preferences:member.preferences,preferencesRevision,
+      preferences:preferenceView({...member}).preferences,preferencesRevision,
       defaults:{language,targetSeconds,preferredAccentId,preferredVoiceCatalogId},
       capabilities:{
         planning:{enabled:false,reasonCode:'FEATURE_NOT_IMPLEMENTED'},

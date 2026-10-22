@@ -8,7 +8,7 @@ PATCH requires same-origin mutation checks, UUID Idempotency-Key and `{expectedR
 
 One transaction fences active membership, compares workspace.settingsRevision, changes only supplied fields, advances the shared settings revision/activity sequence and actor/time, appends one workspace-level event and inserts a durable settings-command snapshot. Same-command replay precedes stale/provider checks and returns its original successful snapshot with Idempotency-Replayed:true, even after later settings saves. The client reloads current settings after confirmation. Reused keys with different normalized input are refused. Receipts have no TTL in this slice to preserve unconfirmed save recovery. Unknown transport/5xx outcomes retain the exact command; no automatic retry or stale merge. Reload replaces unsubmitted form edits explicitly.
 
-Inheritance is captured when a new project composer is loaded: member language override precedes workspace language; workspace duration and a matching-language preferred voice/accent seed the new draft. Changing language clears the captured pair. API-05 still requires a complete explicit SettingsInput; it does not resolve mutable defaults while replaying a create command. Existing/open/recovered drafts, exact pending create bodies, saved projects, approvals, ready videos and scheduled instants remain unchanged. A definitive pre-write VOICE_UNAVAILABLE refusal lets the composer explicitly Clear default voice and save an unresolved draft with a new command; ambiguous failures keep the original command. The API never silently substitutes a voice. Brand/logo customization and personal preference writes remain F13b/c.
+Inheritance is captured when a new project composer is loaded: member language override precedes workspace language; a matching personal voice/accent pair precedes matching-language workspace voice defaults, while duration remains shared. Changing language clears the captured pair. API-05 still requires a complete explicit SettingsInput; it does not resolve mutable defaults while replaying a create command. Existing/open/recovered drafts, exact pending create bodies, saved projects, approvals, ready videos and scheduled instants remain unchanged. A definitive pre-write VOICE_UNAVAILABLE refusal lets the composer explicitly Clear default voice and save an unresolved draft with a new command; ambiguous failures keep the original command. The API never silently substitutes a voice. Brand/logo customization is implemented in F13b; personal preference writes are implemented in F13c.
 
 ## F12c deployed slice — verified local speech reuse (22 October 2026)
 
@@ -450,7 +450,7 @@ Request: no body/query. **200 data:**
 {
   "user": {"id": "user_example_1", "name": "Team member", "email": "member@example.com"},
   "workspace": {"id": "10000000-0000-4000-8000-000000000001", "name": "VideoCraft team", "timezone": "Asia/Kolkata"},
-  "preferences": {"language": null, "voiceCatalogId": null, "timezone": null},
+  "preferences": {"language": null, "voiceCatalogId": null, "accentId": null, "timezone": null},
   "preferencesRevision": 1,
   "defaults": {"language": "en", "targetSeconds": 60, "preferredAccentId": "indian", "preferredVoiceCatalogId": null},
   "capabilities": {
@@ -468,13 +468,19 @@ Implementation checkpoint F02: `/me` returns planning/generation disabled with `
 
 ### API-02 — `PATCH /api/v1/me/preferences`
 
-Request `{expectedRevision, patch}`; patch accepts only personal `language`, `voiceCatalogId`, and `timezone`, each nullable to clear override. No shared workspace default changes here.
+Request `{expectedRevision, patch}`; patch accepts only personal `language`, `voiceCatalogId`, `accentId`, and `timezone`, each nullable to clear override. No shared workspace default changes here.
 
 ```json
 {"expectedRevision":1,"patch":{"language":"te","timezone":"Asia/Kolkata"}}
 ```
 
-**200 data:** `{"preferences":{"language":"te","voiceCatalogId":null,"timezone":"Asia/Kolkata"},"revision":2}`. Validate compatible preference if a voice is supplied; mismatch is 422, stale preferences 409. Saving preferences does not mutate existing project/version/schedule settings.
+**200 data:** `{"preferences":{"language":"te","voiceCatalogId":null,"accentId":null,"timezone":"Asia/Kolkata"},"revision":2}`. Validate compatible preference if a voice is supplied; mismatch is 422, stale preferences 409. Saving preferences does not mutate existing project/version/schedule settings.
+
+F13c implementation (22 October 2026): API-02 and companion `GET /api/v1/me/preferences` return `{revision,preferences}` with exactly the four editable preference fields. API-01 normalizes legacy missing accent to null. PATCH requires authenticated active membership, canonical Origin, UUID Idempotency-Key, a bounded JSON body and positive safe expectedRevision (missing 428). Query parameters/If-Match are refused. Unknown fields 400; invalid language/zone/pair/no-op 422; stale revision or key mismatch 409; unavailable selected voice 503 VOICE_UNAVAILABLE. Language is en|te|null; timezone is a validated IANA identifier|null. Voice/accent are separate controls and must be both selected or both null. A personal voice requires an explicit personal language, preventing an inherited workspace language from silently changing that selection. Voice changes use the current free-only catalog; clearing overrides works while providers are unavailable. No inference/speech request is made by saving preferences.
+
+Original same-member command replay precedes current revision/provider checks, while current access is always rechecked. Permanent private receipts have no TTL. A new save CAS-updates only that membership's preferencesRevision/preferences/updatedAt and inserts its receipt atomically. Shared defaults, branding, activity sequence/read marker, projects/plans/approvals/videos/schedules and other members are unchanged. No shared activity event exposes personal preferences. The UI preserves an exact complete pending save in workspace/user-scoped tab storage, retries unknown outcomes with the original key/body, and retains stale edits until explicit reload. Unsaved incomplete typing is not a durable draft.
+
+Newly loaded composers apply personal language before team language; a saved personal voice/accent applies only to its explicit personal language, otherwise matching-language team defaults apply. Duration/brand/theme/captions remain shared defaults. Existing/open/recovered composers and exact pending create commands retain their captured selections. Personal timezone is persisted for future F18 scheduling; it does not currently override every displayed browser-local timestamp or move scheduled instants. The nullable accent extension preserves the PRD's separate voice/accent requirement without rewriting legacy memberships.
 
 ### API-03 — `GET /api/v1/voices`
 

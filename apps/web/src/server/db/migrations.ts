@@ -15,6 +15,7 @@ import {videoCollections} from './video-schemas';
 import {speechReuseCollections} from './speech-reuse-schemas';
 import {workspaceSettingsCollections} from './workspace-settings-schemas';
 import {brandCollections} from './brand-schemas';
+import {preferencesCollections} from './preferences-schemas';
 import {brandLogoCollections} from './brand-logo-schemas';
 import {logoCollections} from './logo-schemas';
 
@@ -52,6 +53,7 @@ const migrations = [
   {definition: {id: '015_workspace_brand', description: 'Immutable brand palettes, independent revision CAS and replay receipts', contracts: brandCollections}, checksum: createHash('sha256').update(JSON.stringify(brandCollections)).digest('hex')},
   {definition: {id: '016_logo_preparation', description: 'Leased image validation receipts and immutable private prepared logos', contracts: logoCollections}, checksum: createHash('sha256').update(JSON.stringify(logoCollections)).digest('hex')},
   {definition:{id:'017_brand_logo_pins',description:'Immutable brand and generation logo ownership pins',contracts:brandLogoCollections},checksum:createHash('sha256').update(JSON.stringify(brandLogoCollections)).digest('hex')},
+  {definition:{id:'018_personal_preferences',description:'Scoped personal preference replay and separate accent selection',contracts:preferencesCollections},checksum:createHash('sha256').update(JSON.stringify(preferencesCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 
