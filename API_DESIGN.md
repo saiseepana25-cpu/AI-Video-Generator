@@ -813,6 +813,10 @@ Request `{expectedRevision,patch}`; patch accepts timezone and complete `default
 
 ### API-29 — `GET /api/v1/workspace/brand`
 
+**Implemented F13b1 boundary (22 October 2026):** GET/PUT persist and preview a shared palette. Applying branding to project/render snapshots and logo uploads are subsequent increments. Until then projects continue to require `brandKitRevisionId:null`; no generation silently consumes the workspace brand pointer. Current curated IDs are `inter-latin-400`, `noto-sans-telugu-400`, `clean-educational-v1`; `logoAssetId` must be null. Unsupported asset/font/theme inputs fail 422. Both primary and secondary diagram strokes require contrast >=3:1 against the background. Preview label text stays on the background and deterministically chooses black or white (>=4.5:1); no input colors are silently substituted. Three colors are complete six-digit hex values normalized uppercase before hashing/saving. A revision is created only on an intentional save, including the first save of the sample palette.
+
+Both endpoints require active shared membership and private/no-store responses. No query parameters or If-Match. PUT requires canonical Origin, JSON within the standard project body limit, UUID Idempotency-Key and nonnegative safe-integer `expectedRevision` (missing 428). `{expectedRevision,brandKit}` is a complete replacement; unknown fields 400, invalid or unchanged kit 422, stale revision/key mismatch 409. PUT returns 201 on original and replay with `Idempotency-Replayed`; `createdBy` is `{id:userId}`, `createdAt` ISO UTC. Original snapshot replay precedes current revision checks but never current access checks. Normalized equivalent hex case has the same request identity. Receipts have no TTL. The client retains the original body/key on transport, 401 or ambiguous server failure and explicitly retries the same save. Definite conflicts keep edited colors until explicit Reload. Unsaved incomplete palette typing is not a durable draft.
+
 **200 data:** `{revision:0,brandKit:null}` before setup; otherwise current immutable brand-kit revision with id/revision, colors, logo asset nullable, curated font/theme IDs, creator/time. No arbitrary unvalidated CSS/font URLs. Historical plans embed their resolved brand snapshot and do not reread this pointer.
 
 ### API-30 — `PUT /api/v1/workspace/brand`
@@ -820,7 +824,7 @@ Request `{expectedRevision,patch}`; patch accepts timezone and complete `default
 Request `{expectedRevision,brandKit}` replaces the current kit by creating a new immutable revision. Example:
 
 ```json
-{"expectedRevision":0,"brandKit":{"logoAssetId":null,"primaryColor":"#3660D9","secondaryColor":"#173342","backgroundColor":"#F5F3EB","englishFontId":"noto-sans-v1","teluguFontId":"noto-sans-telugu-v1","themeId":"clean-educational-v1"}}
+{"expectedRevision":0,"brandKit":{"logoAssetId":null,"primaryColor":"#3660D9","secondaryColor":"#173342","backgroundColor":"#F5F3EB","englishFontId":"inter-latin-400","teluguFontId":"noto-sans-telugu-400","themeId":"clean-educational-v1"}}
 ```
 
 **201 data:** `{revision:1,brandKit:{id,revision:1,logoAssetId:null,primaryColor,secondaryColor,backgroundColor,englishFontId,teluguFontId,themeId,createdAt,createdBy}}`, with actual values, not shorthand property names. Validate decoded available logo, same-workspace refs, contrast/readability, and curated fonts. If layout/contrast would be invalid, return 422 with supported correction, not silently different approved branding. Explicit null removes the logo in the new revision; old pinned assets remain.

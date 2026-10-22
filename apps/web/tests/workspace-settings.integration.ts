@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {MongoClient,Long,type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {migrateDatabase,checkDatabase} from '../src/server/db/migrations';
-import {workspaceSettingsCollections} from '../src/server/db/workspace-settings-schemas';
+import {brandCollections} from '../src/server/db/brand-schemas';
 import {SettingsService} from '../src/server/settings/service';
 import {ProjectService} from '../src/server/projects/service';
 import {defaultComposerSettings,composerBody} from '../src/lib/composer-settings';
@@ -66,7 +66,7 @@ describe('shared workspace defaults on an isolated replica set',{concurrency:fal
     const input=await body(),before=await db.collection<Row>('workspaces').findOne({}),member=await db.collection<Row>('memberships').findOne({});
     await db.command({collMod:'activity_events',validator:{$jsonSchema:{bsonType:'object',required:['controlled_failure']}}});
     try{await assert.rejects(service.patch(input,randomUUID()),(e:unknown)=>!!e&&typeof e==='object'&&'code'in e&&e.code===121);}
-    finally{await db.command({collMod:'activity_events',validator:workspaceSettingsCollections.find(c=>c.name==='activity_events')!.validator});}
+    finally{await db.command({collMod:'activity_events',validator:brandCollections.find(c=>c.name==='activity_events')!.validator});}
     assert.deepEqual(await db.collection<Row>('workspaces').findOne({}),before);assert.deepEqual(await db.collection<Row>('memberships').findOne({}),member);assert.equal(await db.collection('workspace_settings_commands').countDocuments(),0);assert.equal(await db.collection('activity_events').countDocuments(),0);
   });
 });

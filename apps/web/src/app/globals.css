@@ -363,6 +363,18 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 .workspace-settings-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
 @media (max-width: 760px) { .workspace-settings-panel { padding: 20px; } .workspace-settings-grid { grid-template-columns: minmax(0,1fr); gap: 0; } }
 .video-downloads { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.brand-panel { margin-top: 28px; }
+.brand-color-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
+.brand-color-field > div { display: flex; gap: 8px; }
+.brand-color-field input[type=color] { width: 48px; flex-shrink: 0; padding: 4px; cursor: pointer; }
+.brand-color-field input:not([type=color]) { min-width: 0; font-family: 'Inter', sans-serif; }
+.brand-preview { border: 1px solid #7B8498; border-radius: 18px; padding: 28px; margin: 22px 0; overflow-wrap: anywhere; }
+.brand-preview-kicker { font-size: 11px; letter-spacing: .08em; }
+.brand-preview h3 { font-size: clamp(22px,3vw,32px); margin: 20px 0 12px; font-family: 'Inter', sans-serif; }
+.brand-preview [lang=te] { font-family: 'Noto Sans Telugu', sans-serif; }
+.brand-preview-diagram { display: flex; align-items: center; gap: 10px; margin-top: 28px; }
+.brand-preview-diagram > span:not([aria-hidden]) { flex: 1; border: 2px solid; border-radius: 12px; padding: 18px 8px; text-align: center; min-width: 0; line-height: 1.8; }
+@media (max-width: 760px) { .brand-color-grid { grid-template-columns: minmax(0,1fr); gap: 12px; } .brand-preview { padding: 18px; } .brand-preview-diagram { flex-direction: column; } .brand-preview-diagram > span:not([aria-hidden]) { width: 100%; } .brand-preview-diagram > span[aria-hidden] { transform: rotate(90deg); } }
 .video-downloads .button { max-width: 100%; white-space: normal; }
 .finished-video { display: block; width: 100%; max-height: 66vh; aspect-ratio: 9 / 16; object-fit: contain; border-radius: 14px; background: #080A0F; margin: 20px 0; }
 .video-preview details { overflow-wrap: anywhere; line-height: 1.7; margin: 16px 0; }
