@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Review a video revision (F12b)
+
+After saving plan edits, choose **Review video changes** under **What changed?** to compare the saved plan with the latest completed video's approved input. It highlights narration/matching subtitles, headings, diagrams, scene sequence, source brief and supported settings. Before a first video it explains that there is no completed baseline. Your earlier video stays available in the finished-video panel/history.
+
+This read-only comparison uses no AI credits and does not generate or approve media. New generation still synthesizes all narration; verified audio reuse is not implemented yet. Run **Check video plan** and explicitly approve the exact input separately. Active work or outdated plans must be resolved first. No new credentials, dependencies or database migration are required.
+
 ## Completed-video history (F12a)
 
 Open **View video history** in the finished-video panel to browse completed versions, load older pages and view a selected version's player, transcript and downloads. **Return to latest video** resumes following the current latest output. Viewing an older version does not change the saved plan or latest-video pointer. A newly arriving video does not interrupt an older version you selected. History is metadata, so a listed video may still be temporarily unavailable at playback/download time; refresh or explicitly choose another version, with no automatic regeneration.

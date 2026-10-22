@@ -1,5 +1,9 @@
 # VideoCraft — V1 Database Design
 
+## F12b deployed slice — revision comparison (22 October 2026)
+
+No schema, index or migration change. One read-only snapshot transaction checks active membership and current live-project/plan/source/settings/fingerprint, refuses active pointers, and joins latestReadyVideoId to a same-project/workspace ready video and its exact approval/plan/input hash. Validate approved canonical render input before comparing saved narration/headings/diagrams/settings and source-brief revision. No ready output yields an explicit null baseline. Invalid/foreign baseline fails closed; no fallback to another version. Existing primary/unique indexes serve bounded UUID lookups; comparison arrays are bounded by the existing plan contract. Comparison never touches project counters, activity, speech attempts/reservations, approval snapshots, assets or media. This adds no reusable-audio record, cleanup exception or synthesis permission; exact completed-clip identity/lifecycle verification remains F12c.
+
 ## F12a deployed slice — completed-video history (22 October 2026)
 
 No new collection, migration or index. Read-only snapshot transactions check active membership/live project and query ready_videos by workspaceId/projectId with versionNumber descending and optional `$lt` cursor boundary, using migration 012's unique ready_video_version_v1 index in reverse. The bounded page fetch is limit+1, maximum 51. latestReadyVideoId determines isLatest independently of completion/version numbering, preserving older late-completion semantics. Failed/new drafts and incomplete generation runs are excluded because only committed ready_videos are listed. Browsing/selecting/downloading never rewrites originals, counters, guards, activity or the latest pointer. Available pins and remote integrity remain authoritative at actual media delivery. There is no cleanup/reuse metadata change in this slice.

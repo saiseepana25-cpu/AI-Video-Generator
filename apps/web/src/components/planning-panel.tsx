@@ -4,6 +4,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import type {Angle, JobView, Plan} from '@/server/planning/contracts';
 import {Button} from './ui';
 import {PlanTextEditor, type PlanPreview} from './plan-text-editor';
+import {RevisionReview} from './revision-review';
 import {PlanHistory} from './plan-history';
 import {PlanReadiness} from './plan-readiness';
 import {GenerationPanel} from './generation-panel';
@@ -73,6 +74,7 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
       <PlanTextEditor plan={plan} enabled={ready && !outdated && !active && !command && !sending && !historyPending && !checking} scope={scope} onEditing={setEditing} onSaved={async () => {await onProjectSaved(); await load();}}/>
       {!editing && plan.plan.scenes.map((scene, i) => <article className="plan-scene" key={scene.sceneId}><span className="section-index">SCENE {i + 1} · {scene.layout}</span><h4>{scene.heading}</h4><div className={`diagram-proposal diagram-${scene.layout}`} aria-label={`${scene.layout} diagram proposal`}>{scene.labels.map((label, n) => <span key={n}>{label}</span>)}</div><p>{scene.narration}</p><details><summary>Matching subtitles</summary><p>{plan.plan.captions.find(c => c.sourceSegmentId === scene.sceneId)?.text}</p></details></article>)}
       <div className="recovery-panel">{plan.plan.reviewNotes.map(note => <p key={note}>{note}</p>)}</div>
+      <RevisionReview plan={plan} enabled={ready && !outdated && !active && !command && !sending && !editing && !historyPending && !checking}/>
       <PlanReadiness plan={plan} enabled={ready && !outdated && !active && !command && !sending && !editing && !historyPending} onPending={setChecking} onChecked={setChecked}/>
     </div>}
     <PlanHistory projectId={projectId} current={plan} scope={scope} enabled={ready && !active && !command && !sending && !editing && !checking} onPending={setHistoryPending} onSaved={async () => {await onProjectSaved(); await load();}}/>

@@ -21,6 +21,8 @@ import {sha256, verifyObject} from '../src/server/storage/r2';
 import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
 import type {ReadyVideo} from '../src/server/videos/contracts';
 import {VideoHistoryService} from '../src/server/videos/history';
+import {RevisionReviewService} from '../src/server/planning/revision-review';
+import {PlanEditService} from '../src/server/planning/plan-edit-service';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri)) throw new Error('Isolated loopback database required.');
@@ -430,6 +432,41 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'active'}});
     await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{deletedAt:new Date()}});
     await assert.rejects(history.versions(projectId,query), /could not be found/);
+  });
+  test('revision review without completed output is read-only and requires fresh current input',async()=>{
+    const reviews=new RevisionReviewService(client,name,context),before=await db.collection<Row>('projects').findOne({_id:projectId});
+    const result=await reviews.review(planId);assert.equal(result.baseline,null);assert.equal(result.changes,null);assert.equal(result.speechReuse,false);
+    assert.deepEqual(await db.collection<Row>('projects').findOne({_id:projectId}),before);assert.equal(engine.speechCalls,0);
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$inc:{briefRevision:Long.ONE}});
+    await assert.rejects(reviews.review(planId),/current plan/);
+  });
+  test('revision review compares edited plan to pinned completed approval and preserves playable old output',async()=>{
+    const {storage,store,current}=await storageSetup();await storage.prepare(current._id);await storage.tick();
+    const reviews=new RevisionReviewService(client,name,context),original=(await db.collection<ReadyVideo>('ready_videos').findOne({}))!;
+    assert.equal((await reviews.review(planId)).changes!.hasChanges,false);
+    const project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    const body={expectedProjectRevision:project.revision.toNumber(),edits:{narration:[{segmentId:'scene_1',text:'Clouds form above rivers.'}],headings:[{sceneId:'scene_2',text:'River flow'}]}};
+    const edited=await new PlanEditService(client,name,context).edit(planId,body,randomUUID());
+    const result=await reviews.review(edited.plan.id);assert.equal(result.baseline!.videoId,original._id);assert.equal(result.requiresNewApproval,true);
+    assert.deepEqual(result.changes!.scenes.map(s=>[s.sceneId,s.narrationChanged,s.headingChanged]),[['scene_1',true,false],['scene_2',false,true]]);
+    assert.equal(result.speechReuse,false);assert.deepEqual(await db.collection<ReadyVideo>('ready_videos').findOne({_id:original._id}),original);
+    const videos=new VideoService(client,name,context,store);assert.equal((await videos.latest(projectId)).video!.id,original._id);
+    assert.equal((await videos.download(original._id,'mp4',null)).status,200);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);
+    await assert.rejects(reviews.review(planId),/current plan/);
+  });
+  test('revision review refuses inactive or foreign access, active work and deleted projects',async()=>{
+    const reviews=new RevisionReviewService(client,name,context);
+    await assert.rejects(new RevisionReviewService(client,name,{...context,workspaceId:randomUUID()}).review(planId));
+    await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'disabled'}});await assert.rejects(reviews.review(planId),/team access/);
+    await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'active'}});
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{latestRunId:randomUUID()}});await assert.rejects(reviews.review(planId),/Finish active work/);
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{latestRunId:null,deletedAt:new Date()}});await assert.rejects(reviews.review(planId),/could not be found/);
+  });
+  test('revision review refuses mismatched completed input and cross-project ready pointers',async()=>{
+    const {storage,current}=await storageSetup();await storage.prepare(current._id);await storage.tick();const reviews=new RevisionReviewService(client,name,context);
+    await db.collection<Row>('approvals').updateOne({_id:current.approvalId},{$set:{inputCanonical:'{}'}});await assert.rejects(reviews.review(planId),/could not be verified/);
+    const other=projectFixture();await db.collection<Row>('projects').insertOne(other);
+    await db.collection<Row>('ready_videos').updateOne({runId:current._id},{$set:{projectId:other._id}});await assert.rejects(reviews.review(planId),/could not be verified/);
   });
   test('video history keysets preserve completed versions through concurrent inserts without changing latest', async () => {
     const {storage,store,current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();

@@ -574,6 +574,8 @@ Generate speech first and check measured duration. Proposed production acceptanc
 
 ### 10.5 Targeted revisions
 
+F12b implementation checkpoint (22 October 2026): saved-content change review compares the current plan against the exact canonical approval pinned by latest ready output, in a read-only snapshot. It reports changed scenes/settings and preserves earlier ready versions, without submitting inference/speech/rendering or reserving usage. This is an advisory review, not cache eligibility: the current worker continues to synthesize all segments. Verified speech reuse and dependency-driven partial synthesis remain F12c; do not treat unchanged text in this report as proof of a reusable available clip.
+
 Create a new proposal with parent version and change summary. Compute dependencies before synthesis: changed narration/voice regenerates affected speech; color/logo edits reuse compatible audio; new timing reflows every affected downstream offset; new caption appearance can reuse narration. Preserve the old ready output throughout. A failed new run remains separate.
 
 Latest-ready pointer advancement is conditional on the intended current proposal/run and project remaining live. A late completed older run may be retained as a historical ready version but must not replace a newer selected result. The UI can explicitly select historical ready versions for download/publishing.
