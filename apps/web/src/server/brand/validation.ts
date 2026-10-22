@@ -13,7 +13,7 @@ export function parseBrandPut(raw:unknown):BrandPut{
   if(body.expectedRevision===undefined)throw new ProjectError('PRECONDITION_REQUIRED',428,'Include the saved brand revision.');
   if(!Number.isSafeInteger(body.expectedRevision)||(body.expectedRevision as number)<0)return invalid('Use a nonnegative safe brand revision.');
   const kit=object(body.brandKit,Object.keys(initialBrand));
-  if(kit.logoAssetId!==null)return invalid('Logo uploads are not available yet. Keep logoAssetId null.');
+  if(kit.logoAssetId!==null)return invalid('Attaching prepared logos to brand revisions is not available yet. Keep logoAssetId null.');
   if(kit.englishFontId!==initialBrand.englishFontId||kit.teluguFontId!==initialBrand.teluguFontId||kit.themeId!==initialBrand.themeId)return invalid('Use the supported Inter, Noto Sans Telugu and educational theme.');
   const {primaryColor,secondaryColor,backgroundColor}=kit;
   if(!isColor(primaryColor)||!isColor(secondaryColor)||!isColor(backgroundColor))return invalid('Use six-digit hex colors, such as #B7A4FF.');
