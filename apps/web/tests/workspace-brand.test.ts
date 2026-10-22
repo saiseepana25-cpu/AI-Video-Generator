@@ -2,7 +2,23 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {initialBrand,parseBrandPut,contrast,brandTextColor} from '../src/server/brand/validation';
-import {recoverBrandCommand} from '../src/lib/brand-command';
+import {editableBrandPalette,recoverBrandCommand} from '../src/lib/brand-command';
+import type {BrandView} from '../src/server/brand/service';
+
+test('loaded and confirmed brand revisions can be edited and saved without response metadata',()=>{
+  const loaded:BrandView={revision:1,brandKit:{...initialBrand,id:randomUUID(),revision:1,createdAt:'2026-10-22T00:00:00.000Z',createdBy:{id:'0123456789abcdef01234567'}}};
+  assert.throws(()=>parseBrandPut({expectedRevision:loaded.revision,brandKit:{...loaded.brandKit,primaryColor:'#FFFFFF'}}),/unsupported brand fields/);
+  const draft=editableBrandPalette(loaded.brandKit);
+  const save=parseBrandPut({expectedRevision:loaded.revision,brandKit:{...draft,primaryColor:'#FFFFFF'}});
+  assert.deepEqual(save,{expectedRevision:1,brandKit:{...initialBrand,primaryColor:'#FFFFFF'}});
+  assert.deepEqual(Object.keys(draft).sort(),Object.keys(initialBrand).sort());
+  assert.equal(loaded.brandKit!.primaryColor,initialBrand.primaryColor);
+  const confirmed:BrandView={revision:2,brandKit:{...save.brandKit,id:randomUUID(),revision:2,createdAt:'2026-10-22T00:01:00.000Z',createdBy:loaded.brandKit!.createdBy}};
+  const nextSave=parseBrandPut({expectedRevision:confirmed.revision,brandKit:{...editableBrandPalette(confirmed.brandKit),secondaryColor:'#FFFFFF'}});
+  assert.deepEqual(nextSave,{expectedRevision:2,brandKit:{...initialBrand,primaryColor:'#FFFFFF',secondaryColor:'#FFFFFF'}});
+  assert.deepEqual(recoverBrandCommand(JSON.stringify({key:randomUUID(),body:nextSave}))?.body,nextSave);
+  const first=editableBrandPalette(null);first.primaryColor='#FFFFFF';assert.equal(initialBrand.primaryColor,'#B7A4FF');
+});
 test('brand colors normalize and complete curated palettes accept revision zero',()=>{
   assert.deepEqual(parseBrandPut({expectedRevision:0,brandKit:{...initialBrand,primaryColor:'#b7a4ff'}}),{expectedRevision:0,brandKit:initialBrand});
   assert.doesNotThrow(()=>parseBrandPut({expectedRevision:12,brandKit:{...initialBrand,primaryColor:'#3660D9',secondaryColor:'#173342',backgroundColor:'#F5F3EB'}}));

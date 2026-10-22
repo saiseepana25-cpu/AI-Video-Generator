@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import type {BrandView} from '@/server/brand/service';
 import {initialBrand,parseBrandPut,isColor,brandTextColor,type BrandKit} from '@/server/brand/validation';
-import {recoverBrandCommand,type BrandCommand} from '@/lib/brand-command';
+import {editableBrandPalette,recoverBrandCommand,type BrandCommand} from '@/lib/brand-command';
 import {canCorrectSaveFailure} from '@/lib/save-outcome';
 import {Button} from './ui';
 export function WorkspaceBrand({workspaceId,userId}:{workspaceId:string;userId:string}){
@@ -10,7 +10,7 @@ export function WorkspaceBrand({workspaceId,userId}:{workspaceId:string;userId:s
   const [value,setValue]=useState<BrandView|null>(null),[draft,setDraft]=useState<BrandKit>(initialBrand),[command,setCommand]=useState<BrandCommand|null>(null),[checked,setChecked]=useState(false),[sending,setSending]=useState(false),[loading,setLoading]=useState(false),[conflict,setConflict]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
   const busy=useRef(false),epoch=useRef(0);
   async function load(){const request=++epoch.current;setLoading(true);setError('');
-    try{const response=await fetch('/api/v1/workspace/brand',{cache:'no-store',signal:AbortSignal.timeout(10000)});if(!response.ok)throw new Error();const next=(await response.json()).data as BrandView;if(request!==epoch.current)return;setValue(next);setDraft(next.brandKit??initialBrand);setConflict(false);}
+    try{const response=await fetch('/api/v1/workspace/brand',{cache:'no-store',signal:AbortSignal.timeout(10000)});if(!response.ok)throw new Error();const next=(await response.json()).data as BrandView;if(request!==epoch.current)return;setValue(next);setDraft(editableBrandPalette(next.brandKit));setConflict(false);}
     catch{if(request===epoch.current)setError('Could not load shared branding. Reconnect or sign in again, then reload.');}
     finally{if(request===epoch.current)setLoading(false);}
   }
@@ -24,7 +24,7 @@ export function WorkspaceBrand({workspaceId,userId}:{workspaceId:string;userId:s
     try{const response=await fetch('/api/v1/workspace/brand',{method:'PUT',headers:{'Content-Type':'application/json','Idempotency-Key':next.key},body:JSON.stringify(next.body),signal:AbortSignal.timeout(20000)});const result=await response.json();
       if(!response.ok){if(!canCorrectSaveFailure(response.status,result.error?.code)){setError('Save outcome is unconfirmed. Reconnect or sign in again, then check the same save.');return;}
         sessionStorage.removeItem(scope);setCommand(null);setConflict(response.status===409);setError(result.error?.message??'Check your palette and try again.');return;}
-      sessionStorage.removeItem(scope);setCommand(null);setValue(result.data);setDraft(result.data.brandKit);await load();setMessage('Brand save confirmed. Previous revisions are preserved. Video rendering still uses its approved default palette.');
+      sessionStorage.removeItem(scope);setCommand(null);setValue(result.data);setDraft(editableBrandPalette(result.data.brandKit));await load();setMessage('Brand save confirmed. Previous revisions are preserved. Video rendering still uses its approved default palette.');
     }catch{setError('Save outcome is unconfirmed. Reconnect and check the same save.');}
     finally{busy.current=false;setSending(false);}
   }
