@@ -3,12 +3,13 @@
 import {createHash} from 'node:crypto';
 import type {Plan} from '../planning/contracts';
 import type {ProjectDetail, ProjectSettings} from '../projects/contracts';
+import {isRenderLogo,type RenderLogo} from '../brand/logo';
 import {initialBrand,isBrandPalette,brandTextColor,type BrandKit} from '../brand/palette';
 
 export const RENDER_CONTRACT = 'educational-diagrams-v1';
 export const EVALUATION_VOICE_ID = 'Xb7hH8MSUJpSbSDYk0k2';
 export type FontPins = {heading: string; body: string; telugu: string};
-export type RenderBrand=BrandKit&{revisionId:string};
+export type RenderBrand=BrandKit&{revisionId:string;logoAsset?:RenderLogo};
 export class RenderInputError extends Error {
   constructor(public readonly code: string, message: string) {super(message);}
 }
@@ -57,8 +58,9 @@ export function buildRenderPlan(proposal: Plan, brief: Pick<ProjectDetail['brief
   if (selection.voiceCatalogId !== 'alice-evaluation' || selection.accentId !== 'source-voice') throw new RenderInputError('VOICE_UNSUPPORTED', 'This voice/accent is not supported by the free evaluation adapter.');
   if (selection.themeId !== 'clean-educational-v1' || selection.captionStyleId !== 'readable-default-v1') throw new RenderInputError('SETTINGS_UNSUPPORTED', 'This visual style needs a supported, reviewed adapter.');
   if(brand!==null){
-    object(brand,['revisionId',...Object.keys(initialBrand)]);
-    const {revisionId,...palette}=brand;
+    object(brand,['revisionId',...Object.keys(initialBrand),...(brand.logoAssetId?['logoAsset']:[])]);
+    const {revisionId,logoAsset,...palette}=brand;
+    if(brand.logoAssetId?(!isRenderLogo(logoAsset)||logoAsset.assetId!==brand.logoAssetId):logoAsset!==undefined)return fail('Resolve the exact prepared logo before approval.');
     if(typeof revisionId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(revisionId)||revisionId!==selection.brandKitRevisionId||!isBrandPalette(palette))return fail('Use the exact supported saved brand palette.');
   }else if(selection.brandKitRevisionId!==null)return fail('The selected brand revision must be resolved before approval.');
   array(proposal.scenes, 3, 8); array(proposal.captions, 3, 8); array(proposal.reviewNotes, 0, 5); array(brief.references, 0, 10);
@@ -91,7 +93,7 @@ export function buildRenderPlan(proposal: Plan, brief: Pick<ProjectDetail['brief
   const settingsSnapshot = {language: proposal.language, captionLanguage: proposal.language, targetSeconds: proposal.targetSeconds,
     voiceCatalogId: selection.voiceCatalogId, accentId: selection.accentId,
     speech: {provider: 'elevenlabs', model: 'eleven_v3', voiceId: EVALUATION_VOICE_ID, outputFormat: 'pcm_24000', settings: {stability: 0.5, similarityBoost: 0.75, speed: 1}, adapterVersion: 'elevenlabs-phrase-v1', pronunciationPolicy: 'approved-text-only-v1'},
-    brand: {revisionId: brand?.revisionId??null, logoAsset: null, colors: brand?{canvas:brand.backgroundColor,surface:brand.backgroundColor,text:brandTextColor(brand.backgroundColor),accent:brand.primaryColor,secondary:brand.secondaryColor}:{canvas: '#101218', surface: '#1B1E27', text: '#F4F2FA', accent: '#B7A4FF', secondary: '#7EDDCF'}, fonts: fonts(pins)},
+    brand: {revisionId: brand?.revisionId??null, logoAsset: brand?.logoAsset??null, colors: brand?{canvas:brand.backgroundColor,surface:brand.backgroundColor,text:brandTextColor(brand.backgroundColor),accent:brand.primaryColor,secondary:brand.secondaryColor}:{canvas: '#101218', surface: '#1B1E27', text: '#F4F2FA', accent: '#B7A4FF', secondary: '#7EDDCF'}, fonts: fonts(pins)},
     themeId: selection.themeId, captionStyleId: selection.captionStyleId,
     output: {width: 1080, height: 1920, fps: 30, videoCodec: 'h264', pixelFormat: 'yuv420p', audioCodec: 'aac', audioSampleRate: 48000, audioBitrate: 128000, maxSeconds: 90},
     compilerVersion: 'staged-diagrams-compiler-v1', rendererContractVersion: RENDER_CONTRACT,
@@ -120,7 +122,7 @@ export function validateRenderPlan(raw: unknown): RenderPlan {
       scenes: p.scenes.map(s => ({sceneId: s.sceneId, heading: s.props.heading, narration: p.narration.find(n => n.segmentId === `segment_${s.sceneId}`)!.text, labels: s.props.nodes.map(n => n.label), layout: s.templateId.slice(8) as 'sequence'})),
       captions: p.captions.map(c => ({...c, sourceSegmentId: c.sourceSegmentId.replace(/^segment_/, '')})), reviewNotes: p.reviewNotes.map(n => n.message)};
     const colors=settings.brand.colors;
-    const brand:RenderBrand|null=settings.brand.revisionId===null?null:{...initialBrand,revisionId:settings.brand.revisionId,primaryColor:colors.accent,secondaryColor:colors.secondary,backgroundColor:colors.canvas};
+    const brand:RenderBrand|null=settings.brand.revisionId===null?null:{...initialBrand,revisionId:settings.brand.revisionId,primaryColor:colors.accent,secondaryColor:colors.secondary,backgroundColor:colors.canvas,...(settings.brand.logoAsset?{logoAssetId:settings.brand.logoAsset.assetId,logoAsset:settings.brand.logoAsset}:{})};
     const rebuilt = buildRenderPlan(proposal, {audience: p.audience, references: p.suppliedReferences}, {language: p.language, targetSeconds: p.targetSeconds, voiceCatalogId: settings.voiceCatalogId, accentId: settings.accentId, brandKitRevisionId: settings.brand.revisionId, themeId: settings.themeId, captionStyleId: settings.captionStyleId},
       {heading: brandFonts[0].sha256, body: brandFonts[1].sha256, telugu: brandFonts[2].sha256},brand);
     if (canonicalJson(raw) !== canonicalJson(rebuilt)) return fail('Unsupported fields, coverage, anchors or pinned settings in the video input.');

@@ -15,6 +15,7 @@ import {videoCollections} from './video-schemas';
 import {speechReuseCollections} from './speech-reuse-schemas';
 import {workspaceSettingsCollections} from './workspace-settings-schemas';
 import {brandCollections} from './brand-schemas';
+import {brandLogoCollections} from './brand-logo-schemas';
 import {logoCollections} from './logo-schemas';
 
 export class DatabaseSetupError extends Error {
@@ -50,6 +51,7 @@ const migrations = [
   {definition: {id: '014_workspace_settings', description: 'Nullable shared voice defaults, workspace activity and settings replay receipts', contracts: workspaceSettingsCollections}, checksum: createHash('sha256').update(JSON.stringify(workspaceSettingsCollections)).digest('hex')},
   {definition: {id: '015_workspace_brand', description: 'Immutable brand palettes, independent revision CAS and replay receipts', contracts: brandCollections}, checksum: createHash('sha256').update(JSON.stringify(brandCollections)).digest('hex')},
   {definition: {id: '016_logo_preparation', description: 'Leased image validation receipts and immutable private prepared logos', contracts: logoCollections}, checksum: createHash('sha256').update(JSON.stringify(logoCollections)).digest('hex')},
+  {definition:{id:'017_brand_logo_pins',description:'Immutable brand and generation logo ownership pins',contracts:brandLogoCollections},checksum:createHash('sha256').update(JSON.stringify(brandLogoCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

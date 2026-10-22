@@ -1,3 +1,4 @@
+import {verifiedLogoBytes} from './logo-bytes.js';
 import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +27,7 @@ export async function selectedFontAssets(root: string) {
   return {fonts, pins: Object.fromEntries(fonts.map(f => [f.role, sha(f.bytes)])) as FontPins};
 }
 export async function selectedRendererBuildHash(root: string, pins: FontPins) {
-  const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'apps/web/src/server/brand/palette.ts', 'package-lock.json'];
+  const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'apps/web/src/server/brand/palette.ts', 'src/pipeline/logo-bytes.ts','apps/web/src/server/logos/bytes.ts','apps/web/src/server/brand/logo.ts','package-lock.json'];
   const parts = await Promise.all(files.map(async file => ({file, sha256: sha(await fs.readFile(path.join(root, file)))})));
   return sha(canonicalJson({adapter: 'educational-diagrams-renderer-v1', pins, files: parts}));
 }
@@ -34,14 +35,16 @@ export async function selectedRendererBuildHash(root: string, pins: FontPins) {
 /** Root-only adapter. No MongoDB/env/provider access and no changes to the v1 renderer.
  * The caller supplies decoded clips, exact approval hash and a trusted output root.
  */
-export async function renderSelectedVideo(options: {root: string; outputRoot: string; plan: unknown; expectedHash: string; clips: SelectedClip[]; mode: SelectedVideoProps['mode']; licenseConfirmed: boolean; signal?: AbortSignal; onProgress?: (progress: number) => void}) {
+export async function renderSelectedVideo(options: {root: string; outputRoot: string; plan: unknown; expectedHash: string; clips: SelectedClip[]; mode: SelectedVideoProps['mode']; licenseConfirmed: boolean; logoBytes?:Buffer; signal?: AbortSignal; onProgress?: (progress: number) => void}) {
   if (!options.licenseConfirmed) throw new Error('Confirm Remotion free-license eligibility before rendering.');
   options.signal?.throwIfAborted();
   const timeline = assembleSelected(options.plan, options.expectedHash, options.clips, options.mode), {fonts, pins} = await selectedFontAssets(options.root);
   for (const font of timeline.plan.settingsSnapshot.brand.fonts) if (font.sha256 !== pins[font.role as keyof FontPins]) throw new Error('Installed font bytes do not match the reviewed input.');
+  const logo=verifiedLogoBytes(timeline.plan.settingsSnapshot.brand.logoAsset,options.logoBytes);
   const rendererBuildHash = await selectedRendererBuildHash(options.root, pins), id = randomUUID();
   const folder = path.join(options.outputRoot, id), scratch = path.join(options.root, '.cache', 'selected-renderer', id), publicDir = path.join(scratch, 'public');
   await fs.mkdir(folder, {recursive: true}); await fs.mkdir(path.join(publicDir, 'fonts'), {recursive: true});
+  if(logo)await fs.writeFile(path.join(publicDir,'brand-logo.png'),logo,{flag:'wx'});
   for (const font of fonts) await fs.writeFile(path.join(publicDir, 'fonts', `${font.role}.woff2`), font.bytes);
   const audio = encodeWav(timeline.audio), audioHash = sha(audio), audioFile = `audio-${audioHash}.wav`;
   await fs.writeFile(path.join(publicDir, audioFile), audio); await fs.writeFile(path.join(folder, 'narration.wav'), audio);

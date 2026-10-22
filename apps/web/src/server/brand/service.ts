@@ -1,3 +1,4 @@
+import {pinLogo} from '../logos/selection';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual as equal} from 'node:util';
 import {Long,type ClientSession,type Db,type MongoClient} from 'mongodb';
@@ -35,9 +36,10 @@ export class BrandService{
       if(receipt){if(receipt.requestHash!==requestHash)throw new ProjectError('IDEMPOTENCY_MISMATCH',409,'This save key was used with different branding.');return {brand:receipt.snapshot as BrandView,replayed:true};}
       const current=await this.view(db,session,workspace);
       if(current.revision!==input.expectedRevision)throw new ProjectError('STALE_REVISION',409,'Shared branding changed. Your edits are retained; reload saved branding before saving again.');
-      if(current.brandKit&&equal(palette(current.brandKit),input.brandKit))throw new ProjectError('NO_CHANGES',422,'Change a palette color before saving.');
+      if(current.brandKit&&equal(palette(current.brandKit),input.brandKit))throw new ProjectError('NO_CHANGES',422,'Change a palette color or logo before saving.');
       if(current.revision>=Number.MAX_SAFE_INTEGER||counter(workspace.nextActivitySequence)>=Number.MAX_SAFE_INTEGER)throw new ProjectError('REVISION_LIMIT',409,'This workspace has reached its brand revision limit.');
       await this.authorize(db,session,true);
+      if(input.brandKit.logoAssetId)await pinLogo(db,session,this.context.workspaceId,input.brandKit.logoAssetId,'brand_kit',id);
       const updated=await db.collection<Row>('workspaces').findOneAndUpdate({_id:this.context.workspaceId,brandRevision:workspace.brandRevision,brandKitRevisionId:workspace.brandKitRevisionId},{$set:{brandKitRevisionId:id,updatedAt:now,updatedBy:{kind:'user',userId:this.context.userId}},$inc:{brandRevision:Long.ONE,nextActivitySequence:Long.ONE}},{session,returnDocument:'after'});
       if(!updated)throw new ProjectError('STALE_REVISION',409,'Shared branding changed. Reload before saving.');
       await db.collection<Row>('brand_kits').insertOne({_id:id,schemaVersion:1,workspaceId:this.context.workspaceId,revision:updated.brandRevision,...input.brandKit,parentBrandKitRevisionId:workspace.brandKitRevisionId,createdAt:now,createdBy:{kind:'user',userId:this.context.userId}},{session});

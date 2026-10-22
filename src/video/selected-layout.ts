@@ -32,7 +32,7 @@ export function fitMeasured(text: string, box: {width: number; height: number; m
 export function computeSelectedLayout(props: SelectedVideoProps, measure: (family: 'heading' | 'body', text: string, size: number) => number): SelectedLayout {
   const leading = props.plan.language === 'te' ? 1.65 : 1.4;
   const fit = (text: string, family: 'heading' | 'body', width: number, height: number, max: number, min: number, maxLines: number) => fitMeasured(text, {width, height, max, min, maxLines, leading}, (s, z) => measure(family, s, z));
-  return {title: fit(props.plan.title, 'heading', 936, 180, 48, 36, 3), scenes: props.plan.scenes.map(scene => {
+  return {title: fit(props.plan.title, 'heading', props.plan.settingsSnapshot.brand.logoAsset?720:936, 180, 48, 36, 3), scenes: props.plan.scenes.map(scene => {
     const cue = props.cues.find(c => c.sceneId === scene.sceneId);
     if (!cue) throw new Error('Missing measured scene cue.');
     const caption = fit(cue.text, 'body', 880, 160, 44, 36, 2);

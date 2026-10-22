@@ -4,7 +4,9 @@ import {createHash} from 'node:crypto';
 import {ProviderGateway} from '../../apps/web/src/server/providers/gateway';
 import {GenerationSpeechGateway} from '../../apps/web/src/server/generation/speech-gateway';
 import {GenerationFault, type GenerationEngine, type MeasuredSpeech, type SpeechClip} from '../../apps/web/src/server/generation/engine';
-import {brandPaletteCapability,requiredCapabilities} from '../../apps/web/src/server/generation/contracts';
+import {LogoObjectStore} from '../../apps/web/src/server/logos/store';
+import type {LogoObject} from '../../apps/web/src/server/logos/contracts';
+import {brandLogoCapability,brandPaletteCapability,requiredCapabilities} from '../../apps/web/src/server/generation/contracts';
 import {requireProjectId} from '../../apps/web/src/server/projects/contracts';
 import type {Env} from '../../apps/web/src/server/providers/contracts';
 import type {RenderPlan} from './render-contract.js';
@@ -14,7 +16,7 @@ import {binary} from './probe.js';
 import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
-  capabilities = [...requiredCapabilities,brandPaletteCapability];
+  capabilities = [...requiredCapabilities,brandPaletteCapability,brandLogoCapability];
   constructor(private root: string, private env: Env) {}
   async inspect() {
     if (this.env.REMOTION_FREE_LICENSE_CONFIRMED !== 'true' || !this.env.ELEVENLABS_API_KEY?.trim()) throw new GenerationFault('GENERATION_CONFIGURATION_REQUIRED');
@@ -33,10 +35,11 @@ export class LiveGenerationEngine implements GenerationEngine {
     const audioHash = sha(bytes); if (sha(await fs.readFile(file)) !== audioHash) throw new GenerationFault('LOCAL_AUDIO_WRITE_FAILED');
     return {audioHash, byteLength: bytes.length};
   }
-  async render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal) {
+  async logo(object:LogoObject,signal:AbortSignal){signal.throwIfAborted();const store=new LogoObjectStore(this.env);try{const bytes=await store.read(object);signal.throwIfAborted();return bytes;}finally{store.close();}}
+  async render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal, logo?:Buffer) {
     requireProjectId(runId);
     const result = await renderSelectedVideo({root: this.root, outputRoot: path.join(this.root, 'output', 'dashboard-renders', runId), plan, expectedHash: hash, clips, mode: 'elevenlabs-evaluation',
-      licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal});
+      logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal});
     const id = path.basename(result.folder); requireProjectId(id);
     const manifest = await fs.readFile(path.join(result.folder, 'manifest.json'));
     if (sha(manifest) !== result.manifestHash) throw new GenerationFault('LOCAL_MANIFEST_CHANGED');

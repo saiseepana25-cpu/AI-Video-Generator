@@ -1,3 +1,4 @@
+import {pinLogo} from '../logos/selection';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {Long, type ClientSession, type Db, type MongoClient} from 'mongodb';
@@ -117,6 +118,7 @@ export class GenerationService {
       const units = plan.narration.reduce((n, s) => n + s.text.length * 2 + 100, 0);
       if (!speech || !voice?.available || speech.reservations.some(r => r.state === 'uncertain') || speech.reservations.length >= 100 || (speech.allowance.observedRemaining ?? 0) < units) throw fail('SPEECH_RESERVATION_UNAVAILABLE', 503, 'Refresh free speech availability and resolve any uncertain usage before generation.');
       const runId = randomUUID(), approvalId = randomUUID(), reservationId = randomUUID();
+      if(plan.settingsSnapshot.brand.logoAsset)await pinLogo(db,session,this.context.workspaceId,plan.settingsSnapshot.brand.logoAsset.assetId,'generation_run',runId);
       const reserved = await db.collection<ProviderControl>('provider_controls').updateOne({_id: 'elevenlabs', revision: speech.revision, state: 'enabled', operatorDisabled: {$ne: true}, configHash: providerConfig('elevenlabs', this.env).configHash, expiresAt: {$gt: now}},
         {$inc: {'allowance.observedRemaining': -units, revision: Long.ONE}, $push: {reservations: {id: reservationId, units, state: 'reserved', createdAt: now}}}, {session});
       if (!reserved.matchedCount) throw fail('SPEECH_RESERVATION_UNAVAILABLE', 503, 'Speech availability changed. Check again before generation.');

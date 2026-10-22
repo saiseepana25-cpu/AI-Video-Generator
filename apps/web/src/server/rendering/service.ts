@@ -60,7 +60,7 @@ export class RenderInputService {
       summary: plan ? {language: plan.language, captionLanguage: plan.settingsSnapshot.captionLanguage, targetSeconds: plan.targetSeconds,
         sceneCount: plan.scenes.length, segmentCount: plan.narration.length, templates: [...new Set(plan.scenes.map(s => s.templateId))],
         voice: {catalogId: plan.settingsSnapshot.voiceCatalogId, accentId: plan.settingsSnapshot.accentId, model: plan.settingsSnapshot.speech.model},
-        output: plan.settingsSnapshot.output, usagePolicy: plan.settingsSnapshot.usagePolicy, contract: plan.contract, fonts: plan.settingsSnapshot.brand.fonts,brand:{revisionId:plan.settingsSnapshot.brand.revisionId,colors:plan.settingsSnapshot.brand.colors},
+        output: plan.settingsSnapshot.output, usagePolicy: plan.settingsSnapshot.usagePolicy, contract: plan.contract, fonts: plan.settingsSnapshot.brand.fonts,brand:{revisionId:plan.settingsSnapshot.brand.revisionId,logoAsset:plan.settingsSnapshot.brand.logoAsset,colors:plan.settingsSnapshot.brand.colors},
         timing: 'Measured speech is required before final subtitle and animation timing.'} : null};
   }
 }

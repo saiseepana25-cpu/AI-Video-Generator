@@ -10,6 +10,7 @@ export type Approval = {_id: string; schemaVersion: 1; workspaceId: string; proj
 export type GenerationWorker = {_id: 'generation:local'; owner: string; revision: Long; state: 'healthy' | 'draining' | 'disabled'; contract: string; compilerVersion: string;
   rendererBuildHash: string; capabilities: string[]; fonts: FontPins; heartbeatAt: Date; expiresAt: Date};
 export const requiredCapabilities = ['speech:elevenlabs-phrase-v1', 'render:educational-diagrams-v1', 'timing:measured-phrase-v1', 'queue:leased-generation-v1'];
+export const brandLogoCapability='render:brand-logo-v1';
 export const brandPaletteCapability='render:brand-palette-v1';
 export const generationView = (run: GenerationRun, projectRevision: number) => ({id: run.jobId, jobId: run.jobId, generationRunId: run._id, projectId: run.projectId, planVersionId: run.planVersionId,
   kind: 'generation' as const, state: run.state, statusRevision: run.statusRevision.toNumber(), stage: run.stage ?? 'plan_validation', progress: null,

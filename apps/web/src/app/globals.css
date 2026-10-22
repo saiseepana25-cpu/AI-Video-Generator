@@ -399,3 +399,5 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; }
 .history-preview { background: #1B1E27; border: 1px solid #7B8498; border-radius: 16px; padding: 24px; margin-top: 24px; line-height: 1.8; }
 .history-preview summary { cursor: pointer; min-height: 44px; color: #7EDDCF; }
 @media (max-width: 760px) { .history-list li { align-items: stretch; flex-direction: column; } .history-preview { padding: 16px; } .plan-history .editor-heading { flex-wrap: wrap; gap: 12px; } }
+
+.brand-logo-preview{display:block;width:180px;height:96px;object-fit:contain;margin:0 0 20px auto}.workspace-brand select{max-width:100%;min-height:44px}

@@ -7,7 +7,7 @@ export function WorkspaceLogo({workspaceId,userId}:{workspaceId:string;userId:st
   const scope=`videocraft:${workspaceId}:${userId}:logo-upload:v1`,input=useRef<HTMLInputElement>(null),busy=useRef(false);
   const [command,setCommand]=useState<LogoCommand|null>(null),[view,setView]=useState<LogoView|null>(null),[file,setFile]=useState<File|null>(null),[metadata,setMetadata]=useState<LogoFile|null>(null),[working,setWorking]=useState(false),[checked,setChecked]=useState(false),[error,setError]=useState(''),[previewRevision,setPreviewRevision]=useState(0);
   const active=!!command&&(!view||view.state==='validating');
-  function showResult(next:LogoView){setView(next);if(next.state==='ready')setPreviewRevision(n=>n+1);if(next.state!=='validating'){setFile(null);setMetadata(null);if(input.current)input.current.value='';}}
+  function showResult(next:LogoView){setView(next);if(next.state==='ready'){setPreviewRevision(n=>n+1);window.dispatchEvent(new Event('videocraft-logo-prepared'));}if(next.state!=='validating'){setFile(null);setMetadata(null);if(input.current)input.current.value='';}}
   async function status(cmd:LogoCommand){
     if(busy.current)return;busy.current=true;setWorking(true);setError('');try{const response=await fetch(`/api/v1/workspace/logo-uploads/${cmd.id}`,{cache:'no-store',signal:AbortSignal.timeout(15000)}),result=await response.json();if(response.status===404){setView(null);setError('No receipt was found. Reselect the original file and retry the same upload.');return;}if(!response.ok)throw new Error();showResult(result.data);}catch{setError('Could not confirm this upload. Reconnect or sign in again, then check its status.');}finally{busy.current=false;setWorking(false);}
   }
@@ -25,7 +25,7 @@ export function WorkspaceLogo({workspaceId,userId}:{workspaceId:string;userId:st
     }catch{setError('The upload is unconfirmed. Check its status before retrying the same file.');}finally{busy.current=false;setWorking(false);}
   }
   return <section className="workspace-settings workspace-logo" aria-label="Prepare a logo" aria-busy={working}>
-    <span className="section-index">YOUR LOGO</span><h2>A mark of your own.</h2><p className="muted-copy">Prepare a clean, private logo for your team. Attaching it to saved branding and generated videos comes in the next step.</p>
+    <span className="section-index">YOUR LOGO</span><h2>A mark of your own.</h2><p className="muted-copy">Prepare a clean, private logo for your team. Once prepared, choose it in shared branding above and save. New projects can capture that exact brand revision.</p>
     {!checked&&<p role="status">Checking saved upload…</p>}{error&&<p className="form-error" role="alert">{error}</p>}
     <label className="logo-file-label">{active?'Reselect original image':'Choose a logo'}<input ref={input} type="file" accept="image/png,image/jpeg,image/webp" disabled={!checked||working} onChange={e=>void select(e.target.files?.[0]??null)}/></label>
     <p className="muted-copy">PNG, JPEG or WebP · Up to 5 MB and 4096 × 4096 pixels · Still images only. We strip metadata and prepare a PNG up to 1024 pixels, preserving proportions and transparency.</p>
@@ -33,7 +33,7 @@ export function WorkspaceLogo({workspaceId,userId}:{workspaceId:string;userId:st
     {view?.state==='validating'&&<p role="status">This upload is awaiting confirmation. {view.retryAfterSeconds>0?'The earlier request may still be running. Check its status shortly.':'Reselect the original file if needed, then retry the same upload.'}</p>}
     {view?.state==='rejected'&&<p className="form-error" role="alert">Image rejected. {view.error} Choose a different file to start a new upload.</p>}
     {view?.state==='expired'&&<p role="status">This upload expired. Choose the image again to start a new upload.</p>}
-    {view?.state==='ready'&&view.previewUrl&&<div className="logo-prepared"><img key={previewRevision} src={view.previewUrl} alt="Prepared logo preview" onError={()=>setError('The prepared logo preview is unavailable. Check upload status or sign in again.')}/><p role="status">Logo prepared and stored privately.</p><p className="muted-copy">{view.filename} · Ready for the next branding step. Existing projects and videos are unchanged.</p></div>}
+    {view?.state==='ready'&&view.previewUrl&&<div className="logo-prepared"><img key={previewRevision} src={view.previewUrl} alt="Prepared logo preview" onError={()=>setError('The prepared logo preview is unavailable. Check upload status or sign in again.')}/><p role="status">Logo prepared and stored privately.</p><p className="muted-copy">{view.filename} · Choose this logo in shared branding above and save. Existing projects and videos are unchanged.</p></div>}
     <p className="muted-copy">Keep this tab for upload recovery. After a reload, reselect the same file if asked. An unconfirmed upload keeps its original ID.</p>
   </section>;
 }

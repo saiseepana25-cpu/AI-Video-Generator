@@ -1,5 +1,5 @@
 import React, {useEffect, useState} from 'react';
-import {AbsoluteFill, Audio, cancelRender, continueRender, delayRender, interpolate, staticFile, useCurrentFrame} from 'remotion';
+import {AbsoluteFill, Audio, Img, cancelRender, continueRender, delayRender, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import type {SelectedVideoProps, TextLayout} from '../pipeline/selected-types.js';
 import {computeSelectedLayout} from './selected-layout';
 
@@ -47,7 +47,8 @@ export const SelectedDiagrams: React.FC<SelectedVideoProps> = props => {
   const progress = Math.max(0, Math.min(1, frame / props.durationInFrames));
   return <AbsoluteFill style={{background: colors.canvas, color: colors.text, fontFamily: family(plan.language, 'body')}}>
     <Audio src={staticFile(props.audioFile)}/>
-    <div style={{position: 'absolute', left: 72, right: 72, top: 160, color: plan.settingsSnapshot.brand.revisionId?colors.text:colors.accent}}><Block layout={props.layout.title} language={plan.language} role="heading"/></div>
+    <div style={{position: 'absolute', left: 72, right: plan.settingsSnapshot.brand.logoAsset?288:72, top: 160, color: plan.settingsSnapshot.brand.revisionId?colors.text:colors.accent}}><Block layout={props.layout.title} language={plan.language} role="heading"/></div>
+    {plan.settingsSnapshot.brand.logoAsset&&<Img src={staticFile('brand-logo.png')} style={{position:'absolute',left:828,top:160,width:180,height:96,objectFit:'contain'}}/>}
     <div style={{position: 'absolute', top: 374, left: 72, right: 72}}><Block layout={layout.heading} language={plan.language} role="heading"/></div>
     <svg width="1080" height="1920" viewBox="0 0 1080 1920" style={{position: 'absolute', inset: 0}} aria-label={scene.templateId}>
       <defs><marker id="vc-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill={colors.secondary}/></marker></defs>

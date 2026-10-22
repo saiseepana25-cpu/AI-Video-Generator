@@ -1,3 +1,6 @@
+import {pinnedLogo,logoIdentity} from '../logos/selection';
+import {verifiedLogoBytes} from '../logos/bytes';
+import {compatibleWorker} from './capability';
 import {randomUUID} from 'node:crypto';
 import {Long, type ClientSession, type Db, type MongoClient} from 'mongodb';
 import {databaseTransaction} from '../db/transactions';
@@ -93,7 +96,7 @@ export class GenerationWorker {
       const approval = await db.collection<Approval>('approvals').findOne({_id: run.approvalId, workspaceId: run.workspaceId, projectId: run.projectId, planVersionId: run.planVersionId, inputHash: run.inputHash, settingsSnapshotHash: run.settingsSnapshotHash}, {session});
       let plan: RenderPlan | null = null;
       try {plan = approval && validateRenderPlan(JSON.parse(approval.inputCanonical));} catch { /* Invalid immutable input is a terminal correction, never executable. */ }
-      if (!project || !plan || generationHash(plan) !== run.inputHash || digest(canonicalJson(plan.settingsSnapshot)) !== run.settingsSnapshotHash || run.rendererBuildHash !== slot.rendererBuildHash || canonicalJson(Object.fromEntries(plan.settingsSnapshot.brand.fonts.map(f => [f.role, f.sha256]))) !== canonicalJson(slot.fonts)) {
+      if (!project || !plan || !compatibleWorker(slot,plan) || generationHash(plan) !== run.inputHash || digest(canonicalJson(plan.settingsSnapshot)) !== run.settingsSnapshotHash || run.rendererBuildHash !== slot.rendererBuildHash || canonicalJson(Object.fromEntries(plan.settingsSnapshot.brand.fonts.map(f => [f.role, f.sha256]))) !== canonicalJson(slot.fonts)) {
         await this.finishWithin(db, session, run, 'APPROVAL_OR_WORKER_CHANGED'); return null;
       }
       const next: GenerationRun = {...run, state: 'running', owner: this.owner, leaseEpoch: (run.leaseEpoch ?? Long.ZERO).add(Long.ONE), leaseUntil: new Date(Date.now() + 90000),
@@ -101,9 +104,15 @@ export class GenerationWorker {
       await db.collection<GenerationRun>('generation_runs').replaceOne({_id: run._id, state: 'queued'}, next, {session}); return {run: next, plan};
     });
   }
+  private async guardLogo(db:Db,s:ClientSession,run:GenerationRun,plan:RenderPlan){
+    const expected=plan.settingsSnapshot.brand.logoAsset;if(!expected)return null;
+    const row=await pinnedLogo(db,s,run.workspaceId,expected.assetId,'generation_run',run._id);await pinnedLogo(db,s,run.workspaceId,expected.assetId,'brand_kit',plan.settingsSnapshot.brand.revisionId!);if(canonicalJson(logoIdentity(row._id,row.object))!==canonicalJson(expected))throw new GenerationFault('LOGO_CHANGED');const result=await db.collection<Row>('logo_assets').updateOne({_id:row._id,workspaceId:run.workspaceId,lifecycleState:'available',referenceRevision:row.referenceRevision},{$inc:{referenceRevision:Long.ONE}},{session:s});if(!result.matchedCount)throw new GenerationFault('LOGO_CHANGED');return row.object;
+  }
+  private async approvedLogo(run:GenerationRun,plan:RenderPlan){if(!plan.settingsSnapshot.brand.logoAsset)return null;return databaseTransaction(this.client,this.name,async(db,s)=>{await this.owned(db,s,run);return this.guardLogo(db,s,run,plan);});}
   private async beginSpeech(run: GenerationRun, plan: RenderPlan, segmentId: string, observation: Observation) {
     const id = randomUUID();
     return databaseTransaction(this.client, this.name, async (db, session) => {
+      await this.guardLogo(db,session,run,plan);
       const current = await this.owned(db, session, run), config = providerConfig('elevenlabs', this.env);
       const row = await db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'}, {session});
       const held = row?.reservations.find(r => r.id === run.reservationId && r.state === 'reserved');
@@ -140,9 +149,11 @@ export class GenerationWorker {
         })().catch(() => controller.abort()).finally(() => {heartbeatBusy = false;});
       }, 10000);
       try {
+        const logoObject=await this.approvedLogo(run,plan);let logo:Buffer|undefined;
+        if(logoObject){if(!this.engine.logo)throw new GenerationFault('ENGINE_NOT_CAPABLE');logo=verifiedLogoBytes(plan.settingsSnapshot.brand.logoAsset,await this.engine.logo(logoObject,controller.signal))!;await this.approvedLogo(run,plan);}
         const clips: SpeechClip[] = [];
         for (const segment of plan.narration) {
-          const reused=await trySpeechReuse(this.client,this.name,this.env,this.engine,run,plan,segment.segmentId,controller.signal,(db,session)=>this.owned(db,session,run));
+          const reused=await trySpeechReuse(this.client,this.name,this.env,this.engine,run,plan,segment.segmentId,controller.signal,async(db,session)=>{const owned=await this.owned(db,session,run);await this.guardLogo(db,session,run,plan);return owned;});
           if(reused){clips.push({segmentId:segment.segmentId,text:segment.text,audio:reused,source:{provider:'elevenlabs',model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}});continue;}
           const observation = await this.engine.observe();
           const attempt = await this.beginSpeech(run, plan, segment.segmentId, observation);
@@ -159,9 +170,10 @@ export class GenerationWorker {
           });
           clips.push({segmentId: segment.segmentId, text: segment.text, audio, source: {provider: 'elevenlabs', model: plan.settingsSnapshot.speech.model, voiceId: plan.settingsSnapshot.speech.voiceId}});
         }
+        await this.approvedLogo(run,plan);
         const currentSpec = await this.engine.inspect(); if (currentSpec.rendererBuildHash !== run.rendererBuildHash) throw new GenerationFault('RENDERER_CHANGED');
-        await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'rendering', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});
-        const result = await this.engine.render(run._id, plan, run.inputHash, clips, controller.signal);
+        await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run);await this.guardLogo(db,session,run,plan); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'rendering', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});
+        const result = await this.engine.render(run._id, plan, run.inputHash, clips, controller.signal,logo);
         if (result.rendererBuildHash !== run.rendererBuildHash) throw new GenerationFault('RENDERER_CHANGED');
         await databaseTransaction(this.client, this.name, async (db, session) => {
           const current = await this.owned(db, session, run);

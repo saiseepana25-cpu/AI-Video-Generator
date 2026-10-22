@@ -1,3 +1,4 @@
+import type {LogoObject} from '../logos/contracts';
 import type {RenderPlan, FontPins} from '../rendering/contract';
 import type {Observation} from '../providers/gateway';
 import type {LocalArtifact} from './contracts';
@@ -11,5 +12,6 @@ export interface GenerationEngine {
   speech(plan: RenderPlan, segmentId: string, signal: AbortSignal): Promise<MeasuredSpeech>;
   persistSpeech(runId: string, attemptId: string, audio: MeasuredSpeech): Promise<{audioHash: string; byteLength: number}>;
   readSpeech?(source: {runId:string;attemptId:string;audioHash:string;byteLength:number;sampleRate:number}, signal: AbortSignal): Promise<MeasuredSpeech>;
-  render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal): Promise<Pick<LocalArtifact, '_id' | 'manifestHash' | 'media' | 'rendererBuildHash'>>;
+  logo?(object:LogoObject,signal:AbortSignal):Promise<Buffer>;
+  render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal, logo?:Buffer): Promise<Pick<LocalArtifact, '_id' | 'manifestHash' | 'media' | 'rendererBuildHash'>>;
 }

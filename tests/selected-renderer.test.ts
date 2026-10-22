@@ -81,6 +81,14 @@ test('layout enforces two-line selected-language captions, known template bounds
   assert.ok(layout.scenes.every(s => s.heading.lines.length * s.heading.lineHeight <= 220));
   assert.throws(() => computeSelectedLayout({...props, cues: timeline.cues.map(c => ({...c, endFrame: c.startFrame + 1}))}, (_r, s, z) => s.length * z * .4), /too fast/);
 });
+test('logo reserves a measured title column for English and Telugu while keeping caption/diagram layout',()=>{
+  for(const language of ['en','te'] as const){const {plan,clips,hash}=setup(language),t=assembleSelected(plan,hash,clips,'offline-diagnostic'),props:SelectedVideoProps={plan,cues:t.cues,audioFile:'audio.wav',durationInFrames:t.durationInFrames,mode:'offline-diagnostic',layout:null};
+    const measure=(_r:unknown,text:string,size:number)=>text.length*size*.4,plain=computeSelectedLayout(props,measure),withLogo=structuredClone(props);
+    withLogo.plan.settingsSnapshot.brand.logoAsset={assetId:randomUUID(),sha256:'d'.repeat(64),size:100,width:400,height:100,contentType:'image/png'};
+    const layout=computeSelectedLayout(withLogo,measure);assert.deepEqual(layout.scenes,plain.scenes);assert.ok(layout.title.lines.every(line=>measure('heading',line,layout.title.fontSize)<=720));assert.ok(layout.title.lines.length*layout.title.lineHeight<=180);
+  }
+});
+
 test('license refusal and pre-cancelled execution stop before reading fonts, writing outputs or starting a renderer', async () => {
   const {plan, clips, hash} = setup(), options = {root: '/not-a-project', outputRoot: '/not-an-output', plan, clips, expectedHash: hash, mode: 'offline-diagnostic' as const};
   await assert.rejects(renderSelectedVideo({...options, licenseConfirmed: false}), /license/);

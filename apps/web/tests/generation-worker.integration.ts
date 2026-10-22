@@ -1,3 +1,12 @@
+import sharp from 'sharp';
+import {BrandService} from '../src/server/brand/service';
+import {initialBrand} from '../src/server/brand/palette';
+import {LogoService} from '../src/server/logos/service';
+import {logoHash} from '../src/server/logos/image';
+import {readBrandSelection} from '../src/server/brand/selection';
+import {databaseTransaction} from '../src/server/db/transactions';
+import {RenderInputService} from '../src/server/rendering/service';
+import {brandLogoCapability,brandPaletteCapability} from '../src/server/generation/contracts';
 import {after, before, beforeEach, describe, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -30,7 +39,8 @@ const name = `videocraft_f10_test_${randomUUID().replaceAll('-', '')}`, client =
 const audio = (): MeasuredSpeech => ({sampleRate: 24000, samples: Float32Array.from({length: 24000}, (_, i) => Math.sin(i / 10) * .2)});
 const deferred = <T>() => {let resolve!: (value: T) => void; const promise = new Promise<T>(r => {resolve = r;}); return {promise, resolve};};
 class FakeEngine implements GenerationEngine {
-  capabilities = requiredCapabilities; build = 'd'.repeat(64); speechCalls = 0; renderCalls = 0; remaining = 10000;
+  capabilities:string[] = [...requiredCapabilities]; logoBytes:Buffer|undefined; receivedLogo:Buffer|undefined;
+  logo=async()=>{if(!this.logoBytes)throw new Error('missing logo');return this.logoBytes;}; build = 'd'.repeat(64); speechCalls = 0; renderCalls = 0; remaining = 10000;
   beforeObservation?: () => Promise<void>; duringSpeech?: () => Promise<MeasuredSpeech>; duringRender?: () => Promise<void>; persistFailure = false; renderFailure = false;
   reuseEnabled=false; reuseReads=0; duringRead?:()=>Promise<MeasuredSpeech>;
   readSpeech=async()=>{this.reuseReads++;if(!this.reuseEnabled)throw new Error('missing');return this.duringRead?this.duringRead():audio();};
@@ -38,13 +48,13 @@ class FakeEngine implements GenerationEngine {
   observe = async () => {await this.beforeObservation?.(); return {state: 'enabled' as const, reasonCode: null, languages: ['en', 'te'] as ('en'|'te')[], remaining: this.remaining, periodId: 'test-period'};};
   speech = async () => {this.speechCalls++; return this.duringSpeech ? this.duringSpeech() : audio();};
   persistSpeech = async () => {if (this.persistFailure) throw new Error('disk'); return {audioHash: 'e'.repeat(64), byteLength: 48044};};
-  render = async () => {this.renderCalls++; await this.duringRender?.(); if (this.renderFailure) throw new Error('render'); return {_id: randomUUID(), rendererBuildHash: this.build, manifestHash: 'f'.repeat(64), media: {width: 1080, height: 1920, videoCodec: 'h264', audioCodec: 'aac', durationSeconds: 30.016, audioSampleRate: 48000, meanVolumeDb: -20.1}};};
+  render = async (_run:string,_plan:unknown,_hash:string,_clips:unknown,_signal:AbortSignal,logo?:Buffer) => {this.receivedLogo=logo;this.renderCalls++; await this.duringRender?.(); if (this.renderFailure) throw new Error('render'); return {_id: randomUUID(), rendererBuildHash: this.build, manifestHash: 'f'.repeat(64), media: {width: 1080, height: 1920, videoCodec: 'h264', audioCodec: 'aac', durationSeconds: 30.016, audioSampleRate: 48000, meanVolumeDb: -20.1}};};
 }
 describe('generation worker ownership, submission fencing and recovery', {concurrency: false}, () => {
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -68,6 +78,33 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     return (await db.collection<GenerationRun>('generation_runs').findOne({_id:result.job.generationRunId}))!;
   }
   async function cancelCurrent() {const current = (await run())!; return service.cancel(current.jobId, {expectedRevision: current.statusRevision.toNumber()}, randomUUID());}
+
+  async function logoPlan(){
+    const png=await sharp({create:{width:160,height:80,channels:4,background:{r:10,g:20,b:30,alpha:1}}}).png().toBuffer(),objects=new Map<string,Buffer>();
+    const store={configHash:'a'.repeat(64),bucket:'test-logo-bucket',ensure:async(o:any,b:Buffer)=>{objects.set(o.key,b);},read:async(o:any)=>objects.get(o.key)!,close(){}};
+    const ready=await new LogoService(client,name,context,()=>store).put(randomUUID(),{filename:'test.png',contentType:'image/png',sizeBytes:png.length,sha256:logoHash(png)},png);
+    const brand=(await new BrandService(client,name,context).put({expectedRevision:0,brandKit:{...initialBrand,logoAssetId:ready.assetId}},randomUUID())).brand.brandKit!;
+    const settings={...renderFixture().settings,brandKitRevisionId:brand.id},project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{settings}});await db.collection<PlanVersion>('plan_versions').updateOne({_id:planId},{$set:{settingsSnapshot:settings,inputHash:digest(JSON.stringify({brief:project.brief,settings}))}});
+    engine.capabilities.push(brandPaletteCapability,brandLogoCapability);engine.logoBytes=[...objects.values()][0];await worker.heartbeat();
+    return {ready,body:{expectedProjectRevision:1,planVersionId:planId,generationInputHash:(await new RenderInputService(client,name,context,providerEnv,async()=>pins).prepare(planId)).generationInputHash!}};
+  }
+  test('logo approval pins exact asset and worker supplies verified bytes to renderer',async()=>{
+    const f=await logoPlan();await service.approve(projectId,f.body,randomUUID());assert.equal(await db.collection('logo_asset_refs').countDocuments(),2);assert.equal((await db.collection<Row>('logo_assets').findOne({}))!.refCount,3);
+    await new BrandService(client,name,context).put({expectedRevision:1,brandKit:initialBrand},randomUUID());
+    assert.equal(await worker.tick(),true);assert.equal((await run())!.state,'rendered_local');assert.deepEqual(engine.receivedLogo,engine.logoBytes);assert.equal(engine.speechCalls,3);await checkDatabase(db);
+  });
+  test('old worker cannot admit a logo job and reservations remain unchanged',async()=>{
+    const f=await logoPlan(),before=await provider();engine.capabilities=engine.capabilities.filter(c=>c!==brandLogoCapability);await worker.heartbeat();await assert.rejects(service.approve(projectId,f.body,randomUUID()),/compatible running worker/);assert.deepEqual(await provider(),before);assert.equal(await db.collection('generation_runs').countDocuments(),0);
+  });
+  test('replaced logo bytes fail before speech and release the unused allowance hold',async()=>{
+    const f=await logoPlan(),before=(await provider())!.allowance.observedRemaining;await service.approve(projectId,f.body,randomUUID());engine.logoBytes=Buffer.alloc(engine.logoBytes!.length);
+    assert.equal(await worker.tick(),true);assert.equal((await run())!.state,'failed');assert.equal(engine.speechCalls,0);assert.equal(engine.renderCalls,0);assert.equal((await provider())!.allowance.observedRemaining,before);assert.equal((await provider())!.reservations.length,0);
+  });
+  test('unavailable or unpinned logo fails before speech after queue admission',async()=>{
+    const f=await logoPlan();await service.approve(projectId,f.body,randomUUID());await db.collection('logo_asset_refs').deleteOne({ownerType:'generation_run'});
+    assert.equal(await worker.tick(),true);assert.equal((await run())!.state,'failed');assert.equal(engine.speechCalls,0);assert.equal(engine.renderCalls,0);
+  });
   test('one worker owns the slot and explicit disabled policy survives expiry/startup', async () => {
     const other = new GenerationWorker(client, name, providerEnv, new FakeEngine()); assert.equal(await other.heartbeat(), false);
     await db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local'}, {$set: {state: 'disabled', expiresAt: new Date(0)}});
