@@ -11,6 +11,7 @@ import {VoiceControls} from './voice-controls';
 import {PlanningPanel} from './planning-panel';
 import {ProjectRename} from './project-rename';
 import {ProjectDuplicate} from './project-duplicate';
+import {ProjectDelete} from './project-delete';
 
 type Mode = 'ready' | 'saving' | 'error' | 'session' | 'conflict' | 'review';
 type State = {base: ProjectDetail; draft: Draft; pending: PendingEdit | null; mode: Mode; message: string; latest: ProjectDetail | null};
@@ -22,6 +23,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
   const [planningPending, setPlanningPending] = useState(false);
   const [renamePending, setRenamePending] = useState(true);
   const [duplicatePending, setDuplicatePending] = useState(true);
+  const [deletePending, setDeletePending] = useState(true);
   const recoveryPending = useRef(false);
   const dirty = !sameDraft(state.base, state.draft);
   function update(next: State) {
@@ -77,23 +79,24 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
     } finally {busy.current = false;}
   }
   useEffect(() => {
-    if (!loaded || recovery || renamePending || duplicatePending || state.mode !== 'ready' || !dirty) return;
+    if (!loaded || recovery || renamePending || duplicatePending || deletePending || state.mode !== 'ready' || !dirty) return;
     const timer = setTimeout(() => {void save();}, 2000);
     return () => clearTimeout(timer);
     // save reads the latest ref; this timer restarts only when editable state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, recovery, renamePending, duplicatePending, state.draft, state.mode, dirty]);
+  }, [loaded, recovery, renamePending, duplicatePending, deletePending, state.draft, state.mode, dirty]);
   function edit(draft: Draft) {
     const s = current.current;
     update({...s, draft, mode: s.mode === 'error' && !s.pending ? 'ready' : s.mode, message: s.mode === 'error' && !s.pending ? '' : s.message});
   }
   const brief = state.draft.brief, settings = state.draft.settings;
-  const locked = !loaded || !!recovery || state.mode === 'conflict' || planningPending || renamePending || duplicatePending;
+  const locked = !loaded || !!recovery || state.mode === 'conflict' || planningPending || renamePending || duplicatePending || deletePending;
   const status = recovery ? 'Local draft available' : state.mode === 'saving' ? 'Saving…' : state.mode === 'review' ? 'Review your edits · autosave paused' : state.mode === 'conflict' ? 'Newer saved version · resolve changes' : state.mode === 'error' || state.mode === 'session' ? 'Changes not confirmed' : dirty ? 'Unsaved changes' : 'All changes saved';
   return <>
     <div lang={settings.language === 'te' ? 'te' : undefined}><PageHeading eyebrow="YOUR EXPLANATION" title={state.base.displayTitle} description="A saved idea, ready for its next chapter." action={<span className="draft-badge">Draft</span>}/></div>
-    <div className="project-management"><ProjectRename project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending&&!duplicatePending} onLocked={setRenamePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/>
-    <ProjectDuplicate project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending&&!renamePending} onLocked={setDuplicatePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/></div>
+    <div className="project-management"><ProjectRename project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending&&!duplicatePending&&!deletePending} onLocked={setRenamePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/>
+    <ProjectDuplicate project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending&&!renamePending&&!deletePending} onLocked={setDuplicatePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/>
+    <ProjectDelete project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending&&!renamePending&&!duplicatePending} onLocked={setDeletePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/></div>
     <ol className="project-stages" aria-label="Project workflow"><li aria-current="step"><span>01</span>Plan</li><li><span>02</span>Generate</li><li><span>03</span>Publish</li></ol>
     <div className="project-detail-grid">
     <Panel className="project-idea draft-editor" aria-labelledby="edit-idea-heading">
@@ -116,7 +119,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
       </fieldset>
       {state.mode === 'review' && <div className="recovery-panel"><p>Review is paused. Saving will replace the saved brief/options with the edits shown above.</p><Button onClick={() => void save()}>Save my edits</Button></div>}
       <PlanningPanel projectId={project.id} revision={state.base.revision} briefRevision={state.base.briefRevision} scope={scope}
-        ready={loaded && !recovery && !renamePending && !duplicatePending && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
+        ready={loaded && !recovery && !renamePending && !duplicatePending && !deletePending && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
         onProjectSaved={async () => {
           const response = await fetch(`/api/v1/projects/${project.id}`, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
           if (!response.ok) throw new Error('Could not refresh the project revision.');

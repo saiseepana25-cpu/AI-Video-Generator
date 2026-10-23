@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {MongoClient,Long,type Db} from 'mongodb';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {migrateDatabase,checkDatabase} from '../src/server/db/migrations';
-import {brandCollections} from '../src/server/db/brand-schemas';
+import {deletionCollections} from '../src/server/db/deletion-schemas';
 import {BrandService} from '../src/server/brand/service';
 import {SettingsService} from '../src/server/settings/service';
 import {ProjectService} from '../src/server/projects/service';
@@ -69,7 +69,7 @@ describe('immutable shared branding on an isolated replica set',{concurrency:fal
     const workspace=await db.collection('workspaces').findOne({}),member=await db.collection('memberships').findOne({});
     await db.command({collMod:'activity_events',validator:{$jsonSchema:{bsonType:'object',required:['controlled_failure']}}});
     try{await assert.rejects(service.put(body(),randomUUID()),(e:unknown)=>!!e&&typeof e==='object'&&'code'in e&&e.code===121);}
-    finally{await db.command({collMod:'activity_events',validator:brandCollections.find(c=>c.name==='activity_events')!.validator});}
+    finally{await db.command({collMod:'activity_events',validator:deletionCollections.find(c=>c.name==='activity_events')!.validator});}
     assert.deepEqual(await db.collection('workspaces').findOne({}),workspace);assert.deepEqual(await db.collection('memberships').findOne({}),member);for(const n of ['brand_kits','workspace_brand_commands','activity_events'])assert.equal(await db.collection(n).countDocuments(),0);
   });
   test('database refuses duplicate revision, foreign font and unknown properties',async()=>{

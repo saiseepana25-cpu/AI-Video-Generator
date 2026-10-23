@@ -3,6 +3,7 @@ import {ProjectError} from '@/server/projects/contracts';
 import {rejectIfMatch, requireMutationOrigin, requireIdempotencyKey, readProjectBody} from '@/server/projects/validation';
 import {projectErrorResponse} from '@/server/projects/http';
 import {dataResponse} from '@/server/http/envelope';
+import {parseDeleteInput} from '@/server/projects/deletion';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,4 +25,15 @@ export async function PATCH(request: Request, context: {params: Promise<{project
     const result = await service.patch((await context.params).projectId, await readProjectBody(request), key);
     return dataResponse(result.project, {headers: result.replayed ? {'Idempotency-Replayed': 'true'} : {}});
   } catch (error) {return projectErrorResponse(error);}
+}
+
+export async function DELETE(request:Request,context:{params:Promise<{projectId:string}>}){
+  try{
+    const service=await authenticatedProjects();
+    requireMutationOrigin(request,new URL(process.env.AUTH_URL!).origin);rejectIfMatch(request);
+    if(request.body!==null)throw new ProjectError('UNEXPECTED_BODY',400,'Deletion does not accept a request body.');
+    const input=parseDeleteInput(new URL(request.url).searchParams),key=requireIdempotencyKey(request.headers.get('idempotency-key'));
+    const result=await service.delete((await context.params).projectId,input,key);
+    return dataResponse(result.receipt,{status:202,headers:result.replayed?{'Idempotency-Replayed':'true'}:{}});
+  }catch(error){return projectErrorResponse(error);}
 }
