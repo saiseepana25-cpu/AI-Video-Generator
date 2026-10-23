@@ -206,6 +206,8 @@ Required nullable values are stored as null consistently; optional absent fields
 
 - `projects.revision`: editable project/proposal presentation revision, API CAS.
 - `projects.briefRevision`: generation-relevant brief/settings revision; title-only renames do not increment it.
+
+F14a implementation (23 October 2026): title-only PATCH uses existing validators/indexes and 24-hour idempotency_records; migration manifests remain unchanged. Expected project revision precedes a scoped CAS. An actual rename updates displayTitle/searchTitle and actor/time, increments only project revision, then commits workspace activity sequence, one project_updated event and the safe response receipt in one transaction. No-op titles commit only a receipt. Brief/settings, briefRevision/guardRevision, plan/planning/run/ready-video pointers and immutable artifacts remain unchanged. Replay checks membership and live project before returning its original snapshot; stale/mismatched commands refuse. Combined title/input changes retain existing input-edit restrictions and counters atomically. Rename conflicts with a concurrently prepared approval through project revision, without rewriting captured media. Existing literal title search and project_library_v1 ordering apply; no new collection/index is needed.
 - `guardRevision`, `referenceRevision`, lease epochs: internal safety counters, not editor revisions.
 - `jobs.statusRevision`: visible job control/stage revision. Heartbeat/renderer progress timestamps do not invalidate user cancellation preconditions alone.
 - Intent/connection `revision`: control revision; machine transition may advance it, so stale reschedule/cancel requests must resolve the new state.

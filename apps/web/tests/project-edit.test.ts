@@ -10,7 +10,7 @@ const base = {id: '10000000-0000-4000-8000-000000000001', revision: 1, brief: {i
 test('editing requires a safe revision, whole bounded brief/settings and supported patch keys', () => {
   assert.throws(() => parseProjectPatch({patch: {brief: base.brief}}), (e: unknown) => e instanceof ProjectError && e.status === 428);
   for (const revision of [0, -1, 1.2, '1', Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => parseProjectPatch({expectedProjectRevision: revision, patch: {brief: base.brief}}));
-  for (const patch of [{}, {brief: {idea: 'Only idea'}}, {displayTitle: 'Later feature'}, {settings: {...input.settings, captionLanguage: 'te'}}, {brief: {...base.brief, idea: ''}}]) assert.throws(() => parseProjectPatch({expectedProjectRevision: 1, patch}));
+  for (const patch of [{}, {brief: {idea: 'Only idea'}}, {displayTitle: ''}, {settings: {...input.settings, captionLanguage: 'te'}}, {brief: {...base.brief, idea: ''}}]) assert.throws(() => parseProjectPatch({expectedProjectRevision: 1, patch}));
   const parsed = parseProjectPatch({expectedProjectRevision: 1, patch: {brief: {...base.brief, idea: '  Changed\r\nidea '}, settings: {...input.settings, language: 'te'}}});
   assert.equal(parsed.patch.brief?.idea, 'Changed\nidea'); assert.equal(parsed.patch.settings?.language, 'te');
 });

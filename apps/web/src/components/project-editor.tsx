@@ -5,10 +5,11 @@ import {useEffect, useRef, useState} from 'react';
 import Link from 'next/link';
 import type {ProjectDetail} from '@/server/projects/contracts';
 import {acknowledge, changes, editable, readRecovery, recoveryKey, sameDraft, type Draft, type PendingEdit, type Recovery} from '@/lib/project-draft';
-import {Button, Panel} from './ui';
+import {Button, Panel, PageHeading} from './ui';
 import {CopyDraft} from './copy-draft';
 import {VoiceControls} from './voice-controls';
 import {PlanningPanel} from './planning-panel';
+import {ProjectRename} from './project-rename';
 
 type Mode = 'ready' | 'saving' | 'error' | 'session' | 'conflict' | 'review';
 type State = {base: ProjectDetail; draft: Draft; pending: PendingEdit | null; mode: Mode; message: string; latest: ProjectDetail | null};
@@ -18,6 +19,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
   const [state, setState] = useState(initial), current = useRef(initial), busy = useRef(false);
   const [loaded, setLoaded] = useState(false), [recovery, setRecovery] = useState<Recovery | null>(null), [storageWarning, setStorageWarning] = useState('');
   const [planningPending, setPlanningPending] = useState(false);
+  const [renamePending, setRenamePending] = useState(true);
   const recoveryPending = useRef(false);
   const dirty = !sameDraft(state.base, state.draft);
   function update(next: State) {
@@ -73,20 +75,24 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
     } finally {busy.current = false;}
   }
   useEffect(() => {
-    if (!loaded || recovery || state.mode !== 'ready' || !dirty) return;
+    if (!loaded || recovery || renamePending || state.mode !== 'ready' || !dirty) return;
     const timer = setTimeout(() => {void save();}, 2000);
     return () => clearTimeout(timer);
     // save reads the latest ref; this timer restarts only when editable state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, recovery, state.draft, state.mode, dirty]);
+  }, [loaded, recovery, renamePending, state.draft, state.mode, dirty]);
   function edit(draft: Draft) {
     const s = current.current;
     update({...s, draft, mode: s.mode === 'error' && !s.pending ? 'ready' : s.mode, message: s.mode === 'error' && !s.pending ? '' : s.message});
   }
   const brief = state.draft.brief, settings = state.draft.settings;
-  const locked = !loaded || !!recovery || state.mode === 'conflict' || planningPending;
+  const locked = !loaded || !!recovery || state.mode === 'conflict' || planningPending || renamePending;
   const status = recovery ? 'Local draft available' : state.mode === 'saving' ? 'Saving…' : state.mode === 'review' ? 'Review your edits · autosave paused' : state.mode === 'conflict' ? 'Newer saved version · resolve changes' : state.mode === 'error' || state.mode === 'session' ? 'Changes not confirmed' : dirty ? 'Unsaved changes' : 'All changes saved';
-  return <div className="project-detail-grid">
+  return <>
+    <div lang={settings.language === 'te' ? 'te' : undefined}><PageHeading eyebrow="YOUR EXPLANATION" title={state.base.displayTitle} description="A saved idea, ready for its next chapter." action={<span className="draft-badge">Draft</span>}/></div>
+    <ProjectRename project={state.base} scope={scope} enabled={loaded&&!recovery&&!dirty&&!state.pending&&state.mode==='ready'&&!planningPending} onLocked={setRenamePending} onSaved={saved=>{const s=current.current;update({...s,base:saved,draft:editable(saved)});}}/>
+    <ol className="project-stages" aria-label="Project workflow"><li aria-current="step"><span>01</span>Plan</li><li><span>02</span>Generate</li><li><span>03</span>Publish</li></ol>
+    <div className="project-detail-grid">
     <Panel className="project-idea draft-editor" aria-labelledby="edit-idea-heading">
       <div className="editor-heading"><div><span className="section-index">THE IDEA</span><h2 id="edit-idea-heading">Shape your explanation.</h2></div><span className="save-status" role="status" aria-live="polite">{status}</span></div>
       {storageWarning && <p className="form-error" role="alert">{storageWarning}</p>}
@@ -107,7 +113,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
       </fieldset>
       {state.mode === 'review' && <div className="recovery-panel"><p>Review is paused. Saving will replace the saved brief/options with the edits shown above.</p><Button onClick={() => void save()}>Save my edits</Button></div>}
       <PlanningPanel projectId={project.id} revision={state.base.revision} briefRevision={state.base.briefRevision} scope={scope}
-        ready={loaded && !recovery && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
+        ready={loaded && !recovery && !renamePending && !dirty && !state.pending && state.mode === 'ready'} onPending={setPlanningPending}
         onProjectSaved={async () => {
           const response = await fetch(`/api/v1/projects/${project.id}`, {cache: 'no-store', signal: AbortSignal.timeout(15000)});
           if (!response.ok) throw new Error('Could not refresh the project revision.');
@@ -123,5 +129,5 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
         }}/>
     </Panel>
     <aside className="project-side"><VideoPlayer key={project.id} projectId={project.id}/><Panel className="project-settings"><h2>Video details</h2><dl className="project-facts"><div><dt>Language & subtitles</dt><dd>{settings.language === 'te' ? 'తెలుగు · Telugu' : 'English'}</dd></div><div><dt>Target length</dt><dd>{settings.targetSeconds} seconds</dd></div><div><dt>Brand palette</dt><dd>{settings.brandKitRevisionId ? 'Shared palette captured' : 'Default educational palette'}</dd></div><div><dt>Saved revision</dt><dd>{state.base.revision}</dd></div></dl><p className="muted-copy">Clean educational visuals · Readable captions</p>{(dirty || state.pending || storageWarning) && <CopyDraft text={JSON.stringify(state.draft, null, 2)}/>}</Panel></aside>
-  </div>;
+  </div></>;
 }

@@ -176,14 +176,20 @@ export class ProjectService {
           const angle = source?.result && 'angles' in source.result ? source.result.angles.find(a => a.id === selection.angleId) : null;
           if (!angle || brief.idea !== `${angle.title}\n${angle.hook}\n${angle.learningObjective}`) throw new ProjectError('INVALID_BRAINSTORM_SELECTION', 422, 'Use a current saved angle from this project.');
         }
-        const changed = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
+        const inputsChanged = JSON.stringify(brief) !== JSON.stringify(row.brief) || JSON.stringify(settings) !== JSON.stringify(row.settings);
+        const displayTitle = input.patch.displayTitle ?? row.displayTitle;
+        const titleChanged = displayTitle !== row.displayTitle;
+        const changed = inputsChanged || titleChanged;
         let saved = row;
         if (changed) {
-          if (JSON.stringify(settings) !== JSON.stringify(row.settings)) {await readBrandSelection(db,session,this.context.workspaceId,settings.brandKitRevisionId);await assertVoiceSelection(db, settings, this.providerEnv, session);}
-          if (['latestRunId', 'latestReadyVideoId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing generated projects is not available yet.');
-          if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
+          if (inputsChanged && JSON.stringify(settings) !== JSON.stringify(row.settings)) {await readBrandSelection(db,session,this.context.workspaceId,settings.brandKitRevisionId);await assertVoiceSelection(db, settings, this.providerEnv, session);}
+          if (inputsChanged && ['latestRunId', 'latestReadyVideoId'].some(field => row[field] != null)) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'Editing generated projects is not available yet.');
+          if (counter(row.revision) >= Number.MAX_SAFE_INTEGER || inputsChanged && counter(row.briefRevision) >= Number.MAX_SAFE_INTEGER) throw new ProjectError('EDIT_UNAVAILABLE', 409, 'This project has reached its revision limit.');
           const updated = await db.collection<ProjectRecord>('projects').findOneAndUpdate({...filter, revision: Long.fromNumber(input.expectedProjectRevision)}, {
-            $set: {brief, settings, updatedAt: now, updatedBy: actor, activePlanningJobId: null, planningRequestId: null}, $inc: {revision: Long.ONE, briefRevision: Long.ONE, guardRevision: Long.ONE},
+            $set: {updatedAt: now, updatedBy: actor,
+              ...(titleChanged ? {displayTitle, searchTitle: searchTitle(displayTitle)} : {}),
+              ...(inputsChanged ? {brief, settings, activePlanningJobId: null, planningRequestId: null} : {})},
+            $inc: {revision: Long.ONE, ...(inputsChanged ? {briefRevision: Long.ONE, guardRevision: Long.ONE} : {})},
           }, {session, returnDocument: 'after'});
           if (!updated) throw new ProjectError('STALE_REVISION', 409, 'Reload and review the latest saved changes.');
           saved = updated;
@@ -191,7 +197,7 @@ export class ProjectService {
           if (!workspace) throw new ProjectError('CONNECTION_UNAVAILABLE', 503, 'The workspace is unavailable.', [], true);
           await db.collection<Row>('activity_events').insertOne({_id: eventId, schemaVersion: 1, workspaceId: this.context.workspaceId,
             projectId: id, sequence: workspace.nextActivitySequence, dedupeKey: `project_updated:${id}:${counter(saved.revision)}`, type: 'project_updated', actor,
-            resourceRefs: {projectId: id}, message: 'A project brief was updated.', actionNeeded: false, safeActionRoute: `/projects/${id}`, createdAt: now}, {session});
+            resourceRefs: {projectId: id}, message: inputsChanged ? 'A project brief was updated.' : 'A project was renamed.', actionNeeded: false, safeActionRoute: `/projects/${id}`, createdAt: now}, {session});
         }
         const snapshot = this.detail(saved, await this.names([saved], db, session));
         await db.collection('idempotency_records').deleteOne({...identity, expiresAt: {$lte: now}}, {session});

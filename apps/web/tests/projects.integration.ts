@@ -201,6 +201,64 @@ describe('shared project library on a real local replica set', {concurrency: fal
     await assert.rejects(service.patch(randomUUID(), body, randomUUID()), hasCode('RESOURCE_NOT_FOUND'));
   });
 
+  test('title-only rename updates literal search and actor while preserving generation inputs and pointers', async () => {
+    const first=(await service.create(input(),randomUUID())).project;
+    const pointers={currentPlanVersionId:randomUUID(),activePlanningJobId:randomUUID(),planningRequestId:randomUUID(),latestRunId:randomUUID(),latestReadyVideoId:randomUUID()};
+    await db.collection<Row>('projects').updateOne({_id:first.id},{$set:pointers});
+    const before=await db.collection<Row>('projects').findOne({_id:first.id});
+    const body={expectedProjectRevision:1,patch:{displayTitle:'  నీటి ప్రయాణం [QA].*  '}};
+    const saved=(await service.patch(first.id,body,randomUUID())).project;
+    assert.equal(saved.displayTitle,'నీటి ప్రయాణం [QA].*');assert.equal(saved.revision,2);assert.equal(saved.briefRevision,1);
+    const after=await db.collection<Row>('projects').findOne({_id:first.id});
+    for(const field of ['brief','settings','briefRevision','guardRevision','nextPlanVersionNumber','nextVideoVersionNumber',...Object.keys(pointers)])assert.deepEqual(after![field],before![field],field);
+    assert.equal(after!.searchTitle,'నీటి ప్రయాణం [qa].*');
+    const results=await service.list(parseListOptions(new URLSearchParams('q=%5BQA%5D.*')));assert.ok(results.items.some(p=>p.id===first.id));
+    const event=await db.collection('activity_events').findOne({projectId:first.id,type:'project_updated'});assert.equal(event!.message,'A project was renamed.');
+    await assert.rejects(service.patch(first.id,{expectedProjectRevision:2,patch:{displayTitle:'Must not partially rename',brief:{...first.brief,idea:'Changed'}}},randomUUID()),hasCode('EDIT_UNAVAILABLE'));
+    assert.equal((await service.get(first.id)).displayTitle,saved.displayTitle);
+  });
+
+  test('rename concurrent retries replay exactly once, stale writers refuse and old snapshots remain original',async()=>{
+    const first=(await service.create(input(),randomUUID())).project,key=randomUUID(),body={expectedProjectRevision:1,patch:{displayTitle:'First rename'}};
+    const results=await Promise.all(Array.from({length:4},()=>service.patch(first.id,body,key)));
+    assert.equal(results.filter(v=>!v.replayed).length,1);assert.equal(await db.collection('activity_events').countDocuments({projectId:first.id,type:'project_updated'}),1);
+    const races=await Promise.allSettled(['Second A','Second B'].map(displayTitle=>service.patch(first.id,{expectedProjectRevision:2,patch:{displayTitle}},randomUUID())));
+    assert.equal(races.filter(v=>v.status==='fulfilled').length,1);const loser=races.find(v=>v.status==='rejected');assert.ok(loser?.status==='rejected');assert.equal(loser.reason.code,'STALE_REVISION');
+    assert.deepEqual((await service.patch(first.id,body,key)).project,results[0].project);
+    await assert.rejects(service.patch(first.id,{...body,patch:{displayTitle:'Different payload'}},key),hasCode('IDEMPOTENCY_MISMATCH'));
+    await assert.rejects(service.patch(first.id,{expectedProjectRevision:2,patch:{brief:{...first.brief,idea:'Stale brief'}}},randomUUID()),hasCode('STALE_REVISION'));
+  });
+
+  test('canonical no-op rename preserves counters and title-only rename can accompany a valid brief edit',async()=>{
+    const first=(await service.create(input(),randomUUID())).project;
+    const before=await db.collection<Row>('projects').findOne({_id:first.id});
+    const saved=await service.patch(first.id,{expectedProjectRevision:1,patch:{displayTitle:` ${first.displayTitle} `}},randomUUID());
+    assert.equal(saved.project.revision,1);assert.deepEqual(await db.collection<Row>('projects').findOne({_id:first.id}),before);
+    assert.equal(await db.collection('activity_events').countDocuments({projectId:first.id}),1);
+    const both=(await service.patch(first.id,{expectedProjectRevision:1,patch:{displayTitle:'New name',brief:{...first.brief,idea:'New explanation'}}},randomUUID())).project;
+    assert.equal(both.displayTitle,'New name');assert.equal(both.revision,2);assert.equal(both.briefRevision,2);
+  });
+
+  test('rename refuses inaccessible projects and revoked membership, including successful receipt replay',async()=>{
+    const first=(await service.create(input(),randomUUID())).project,key=randomUUID(),body={expectedProjectRevision:1,patch:{displayTitle:'Renamed'}};
+    await service.patch(first.id,body,key);
+    const other=new ProjectService(client,name,{...context,workspaceId:randomUUID()},secret);
+    await assert.rejects(other.patch(first.id,body,key),hasCode('TEAM_ACCESS_DENIED'));
+    await db.collection<Row>('memberships').updateOne({workspaceId:context.workspaceId,userId:context.userId},{$set:{status:'disabled',disabledAt:new Date(),disabledBy:{kind:'user',userId:context.userId}}});
+    try{await assert.rejects(service.patch(first.id,body,key),hasCode('TEAM_ACCESS_DENIED'));}finally{await db.collection<Row>('memberships').updateOne({workspaceId:context.workspaceId,userId:context.userId},{$set:{status:'active',disabledAt:null,disabledBy:null}});}
+    await db.collection<Row>('projects').updateOne({_id:first.id},{$set:{deletedAt:new Date(),deletedBy:{kind:'user',userId:context.userId}}});
+    await assert.rejects(service.patch(first.id,body,key),hasCode('RESOURCE_NOT_FOUND'));
+  });
+
+  test('rename receipt failure rolls back title, search, actor, counters and activity',async()=>{
+    const first=(await service.create(input(),randomUUID())).project,before=await db.collection<Row>('projects').findOne({_id:first.id}),workspace=await db.collection<Row>('workspaces').findOne({_id:context.workspaceId});
+    const contract=planningCollections.find(c=>c.name==='idempotency_records')!;
+    await db.command({collMod:'idempotency_records',validator:{$jsonSchema:{bsonType:'object',required:['controlled_failure']}}});
+    try{await assert.rejects(service.patch(first.id,{expectedProjectRevision:1,patch:{displayTitle:'Must roll back'}},randomUUID()));}finally{await db.command({collMod:'idempotency_records',validator:contract.validator});}
+    assert.deepEqual(await db.collection<Row>('projects').findOne({_id:first.id}),before);assert.equal(await db.collection('activity_events').countDocuments({projectId:first.id}),1);
+    assert.equal((await db.collection<Row>('workspaces').findOne({_id:context.workspaceId}))!.nextActivitySequence.toString(),workspace!.nextActivitySequence.toString());
+  });
+
   test('failed edit receipt rolls back the project, activity and workspace counter', async () => {
     const first = (await service.create(input(), randomUUID())).project;
     const before = await db.collection<Row>('workspaces').findOne({_id: context.workspaceId});

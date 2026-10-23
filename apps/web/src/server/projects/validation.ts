@@ -70,14 +70,19 @@ export function parseProjectInput(value: unknown): ProjectInput {
 }
 
 export type ListOptions = {q: string; limit: number; cursor: string | null; order: 'updated_desc'};
-export type ProjectPatch = {expectedProjectRevision: number; patch: {brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']; brainstormSelection?: {jobId: string; angleId: string}}};
+export function parseDisplayTitle(value: unknown): string {
+  if (typeof value !== 'string' || /[<>\u0000-\u001f\u007f\u2028\u2029\uD800-\uDFFF]/u.test(value)) fail('/patch/displayTitle', 'Use a single-line plain-text title.');
+  return text(value, '/patch/displayTitle', 120);
+}
+export type ProjectPatch = {expectedProjectRevision: number; patch: {displayTitle?: string; brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']; brainstormSelection?: {jobId: string; angleId: string}}};
 export function parseProjectPatch(value: unknown): ProjectPatch {
   const body = object(value, ['expectedProjectRevision', 'patch'], '/');
   if (body.expectedProjectRevision === undefined) throw new ProjectError('PRECONDITION_REQUIRED', 428, 'Include the saved project revision.');
   if (!Number.isSafeInteger(body.expectedProjectRevision) || (body.expectedProjectRevision as number) < 1) fail('/expectedProjectRevision', 'Use a positive safe integer revision.');
-  const raw = object(body.patch, ['brief', 'settings', 'brainstormSelection'], '/patch');
-  if (!Object.keys(raw).length) fail('/patch', 'Include a brief or settings replacement.');
+  const raw = object(body.patch, ['displayTitle', 'brief', 'settings', 'brainstormSelection'], '/patch');
+  if (!Object.keys(raw).length) fail('/patch', 'Include a title, brief or settings replacement.');
   const patch: ProjectPatch['patch'] = {};
+  if ('displayTitle' in raw) patch.displayTitle = parseDisplayTitle(raw.displayTitle);
   const defaults = {language: 'en', targetSeconds: 60, accentId: null, voiceCatalogId: null, brandKitRevisionId: null, themeId: 'clean-educational-v1', captionStyleId: 'readable-default-v1'};
   if ('brief' in raw) {
     const brief = object(raw.brief, ['idea', 'audience', 'references'], '/patch/brief');
