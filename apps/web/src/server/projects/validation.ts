@@ -70,9 +70,20 @@ export function parseProjectInput(value: unknown): ProjectInput {
 }
 
 export type ListOptions = {q: string; limit: number; cursor: string | null; order: 'updated_desc'};
-export function parseDisplayTitle(value: unknown): string {
-  if (typeof value !== 'string' || /[<>\u0000-\u001f\u007f\u2028\u2029\uD800-\uDFFF]/u.test(value)) fail('/patch/displayTitle', 'Use a single-line plain-text title.');
-  return text(value, '/patch/displayTitle', 120);
+export function parseDisplayTitle(value: unknown, path='/patch/displayTitle'): string {
+  if (typeof value !== 'string' || /[<>\u0000-\u001f\u007f\u2028\u2029\uD800-\uDFFF]/u.test(value)) fail(path, 'Use a single-line plain-text title.');
+  return text(value, path, 120);
+}
+export type DuplicateInput = {expectedProjectRevision:number;displayTitle?:string};
+export function parseDuplicateInput(value:unknown):DuplicateInput{
+  const body=object(value,['expectedProjectRevision','displayTitle'],'/');
+  if(body.expectedProjectRevision===undefined)throw new ProjectError('PRECONDITION_REQUIRED',428,'Include the saved source project revision.');
+  if(!Number.isSafeInteger(body.expectedProjectRevision)||(body.expectedProjectRevision as number)<1)fail('/expectedProjectRevision','Use a positive safe integer revision.');
+  return {expectedProjectRevision:body.expectedProjectRevision as number,...('displayTitle'in body?{displayTitle:parseDisplayTitle(body.displayTitle,'/displayTitle')}:{})};
+}
+export function defaultDuplicateTitle(title:string):string{
+  const clean=normalizeText(title.replace(/[<>\u0000-\u001f\u007f\u2028\u2029]/gu,' ').replace(/\s+/g,' '))||'project';
+  return `Copy of ${graphemes(clean).slice(0,112).join('')}`;
 }
 export type ProjectPatch = {expectedProjectRevision: number; patch: {displayTitle?: string; brief?: {idea: string; audience: string; references: ProjectInput['references']}; settings?: ProjectInput['settings']; brainstormSelection?: {jobId: string; angleId: string}}};
 export function parseProjectPatch(value: unknown): ProjectPatch {

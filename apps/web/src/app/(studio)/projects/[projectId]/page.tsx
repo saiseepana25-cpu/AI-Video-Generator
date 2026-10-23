@@ -16,6 +16,6 @@ export default async function ProjectPage({params}: {params: Promise<{projectId:
   });
   return <>
     <Link href="/projects" className="back-link">← All projects</Link>
-    <ProjectEditor project={project} workspaceId={context.workspace._id} userId={context.identity.userId}/>
+    <ProjectEditor key={project.id} project={project} workspaceId={context.workspace._id} userId={context.identity.userId}/>
   </>;
 }

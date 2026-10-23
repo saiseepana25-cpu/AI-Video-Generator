@@ -89,7 +89,7 @@ describe('provider controls on a real local replica set', {concurrency: false}, 
     await db.collection<Row>('schema_migrations').deleteOne({_id: '013_verified_speech_reuse'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '014_workspace_settings'});
     await db.collection<Row>('schema_migrations').deleteOne({_id: '015_workspace_brand'});
-    await db.collection<Row>('schema_migrations').deleteMany({_id:{$in:['016_logo_preparation','017_brand_logo_pins','018_personal_preferences']}});
+    await db.collection<Row>('schema_migrations').deleteMany({_id:{$in:['016_logo_preparation','017_brand_logo_pins','018_personal_preferences','019_project_duplication']}});
     await db.command({collMod:'workspaces',validator:ownedCollections.find(c=>c.name==='workspaces')!.validator});
     await db.command({collMod: 'memberships', validator: ownedCollections.find(c => c.name === 'memberships')!.validator});
     for (const contract of editCollections) await db.command({collMod: contract.name, validator: contract.validator});

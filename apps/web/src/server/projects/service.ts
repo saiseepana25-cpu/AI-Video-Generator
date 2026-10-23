@@ -1,13 +1,14 @@
 import {createHash, randomUUID} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {Long, ObjectId, type ClientSession, type Db, type Document, type MongoClient} from 'mongodb';
 import {databaseTransaction} from '../db/transactions';
 import {assertVoiceSelection} from '../providers/catalog';
 import {readBrandSelection} from '../brand/selection';
 import type {Env} from '../providers/contracts';
-import type {Job} from '../planning/contracts';
+import type {Job,PlanVersion} from '../planning/contracts';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
 import {ProjectError, requireProjectId, type ProjectContext, type ProjectDetail, type ProjectInput, type ProjectPage, type ProjectSummary} from './contracts';
-import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
+import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, parseDuplicateInput, defaultDuplicateTitle, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
 
 type Row = Document & {_id: string};
 type Actor = {kind: 'user'; userId: string} | {kind: 'system'; service: string};
@@ -141,6 +142,56 @@ export class ProjectService {
       }
       throw error;
     }
+  }
+
+  async duplicate(id:string,raw:unknown,key:string):Promise<{project:ProjectDetail;replayed:boolean}>{
+    await this.authorize();requireProjectId(id);requireIdempotencyKey(key);
+    const input=parseDuplicateInput(raw),requestHash=hash(JSON.stringify(input)),now=new Date();
+    const projectId=randomUUID(),planId=randomUUID(),receiptId=randomUUID(),eventId=randomUUID(),actor={kind:'user' as const,userId:this.context.userId};
+    const identity={workspaceId:this.context.workspaceId,userId:this.context.userId,sourceProjectId:id,keyHash:hash(key)};
+    const replay=async(db:Db,session?:ClientSession)=>{
+      const receipt=await db.collection<Row>('project_duplicate_commands').findOne(identity,{session});if(!receipt)return null;
+      if(receipt.requestHash!==requestHash)throw new ProjectError('IDEMPOTENCY_MISMATCH',409,'This request key was used for a different duplicate.');
+      for(const target of [id,receipt.projectId])if(!await db.collection<Row>('projects').findOne({_id:target,workspaceId:this.context.workspaceId,deletedAt:null},{session,projection:{_id:1}}))throw notFound();
+      return {project:receipt.snapshot as ProjectDetail,replayed:true};
+    };
+    try{return await databaseTransaction(this.client,this.databaseName,async(db,session)=>{
+      await this.authorize(db,session);const prior=await replay(db,session);if(prior)return prior;
+      const source=await db.collection<ProjectRecord>('projects').findOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null},{session});if(!source)throw notFound();
+      if(counter(source.revision)!==input.expectedProjectRevision)throw new ProjectError('STALE_REVISION',409,'The source project has newer saved changes. Reload and review before duplicating.');
+      await readBrandSelection(db,session,this.context.workspaceId,source.settings.brandKitRevisionId);
+      let proposal:PlanVersion|null=null;
+      if(source.currentPlanVersionId){
+        const candidate=await db.collection<PlanVersion>('plan_versions').findOne({_id:source.currentPlanVersionId,workspaceId:this.context.workspaceId,projectId:id},{session});
+        if(!candidate)throw new ProjectError('DUPLICATE_SOURCE_INVALID',409,'The source plan is unavailable. Review the original project.');
+        if(source.briefRevision.equals(candidate.sourceBriefRevision)&&source.planningRequestId===candidate.sourcePlanningRequestId&&isDeepStrictEqual(source.settings,candidate.settingsSnapshot)&&hash(JSON.stringify({brief:source.brief,settings:source.settings}))===candidate.inputHash)proposal=candidate;
+      }
+      // Fence concurrent source changes/deletion and membership revocation without
+      // advancing the source editor revision or changing its active work.
+      const member=await db.collection<Row>('memberships').findOne({workspaceId:this.context.workspaceId,userId:this.context.userId,status:'active'},{session});
+      if(!member)throw new ProjectError('TEAM_ACCESS_DENIED',403,'This account does not have team access.');
+      if(counter(source.guardRevision)>=Number.MAX_SAFE_INTEGER||member.generationGuardRevision&&counter(member.generationGuardRevision)>=Number.MAX_SAFE_INTEGER)throw new ProjectError('DUPLICATE_UNAVAILABLE',409,'This project cannot be duplicated at its current counter limit.');
+      if(!(await db.collection<Row>('memberships').updateOne({_id:member._id,status:'active'},{$inc:{generationGuardRevision:Long.ONE}},{session})).matchedCount)throw new ProjectError('TEAM_ACCESS_DENIED',403,'This account does not have team access.');
+      if(!(await db.collection<Row>('projects').updateOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null,revision:source.revision},{$inc:{guardRevision:Long.ONE}},{session})).matchedCount)throw new ProjectError('STALE_REVISION',409,'Reload the source project before duplicating.');
+      const displayTitle=input.displayTitle??defaultDuplicateTitle(source.displayTitle);
+      const record:ProjectRecord={_id:projectId,schemaVersion:1,workspaceId:this.context.workspaceId,displayTitle,searchTitle:searchTitle(displayTitle),brief:structuredClone(source.brief),settings:structuredClone(source.settings),
+        revision:Long.ONE,briefRevision:Long.ONE,guardRevision:Long.ZERO,currentPlanVersionId:proposal?planId:null,planningRequestId:proposal?planId:null,activePlanningJobId:null,latestRunId:null,latestReadyVideoId:null,
+        nextPlanVersionNumber:proposal?Long.ONE:Long.ZERO,nextVideoVersionNumber:Long.ZERO,nextMessageSequence:Long.ZERO,createdBy:actor,updatedBy:actor,createdAt:now,updatedAt:now,
+        deletedAt:null,deletedBy:null,cleanupJobId:null,deletionReceipt:null,sourceProjectId:id};
+      await db.collection<ProjectRecord>('projects').insertOne(record,{session});
+      if(proposal){
+        const copied:PlanVersion={_id:planId,schemaVersion:1,workspaceId:this.context.workspaceId,projectId,versionNumber:Long.ONE,sourceBriefRevision:Long.ONE,sourcePlanningRequestId:planId,
+          inputHash:hash(JSON.stringify({brief:record.brief,settings:record.settings})),settingsSnapshot:structuredClone(record.settings),plan:structuredClone(proposal.plan),
+          source:'duplicate',parentPlanVersionId:null,restoredFromPlanVersionId:null,duplicatedFromPlanVersionId:proposal._id,contentHash:hash(JSON.stringify({plan:proposal.plan,settings:record.settings})),
+          plannerModelId:proposal.plannerModelId,promptContractVersion:proposal.promptContractVersion,createdAt:now,createdBy:this.context.userId};
+        await db.collection<PlanVersion>('plan_versions').insertOne(copied,{session});
+      }
+      const workspace=await db.collection<Row>('workspaces').findOneAndUpdate({_id:this.context.workspaceId},{$inc:{nextActivitySequence:Long.ONE}},{session,returnDocument:'after'});if(!workspace)throw new ProjectError('CONNECTION_UNAVAILABLE',503,'The workspace is unavailable.',[],true);
+      await db.collection<Row>('activity_events').insertOne({_id:eventId,schemaVersion:1,workspaceId:this.context.workspaceId,projectId,sequence:workspace.nextActivitySequence,dedupeKey:`project_created:${projectId}`,type:'project_created',actor,resourceRefs:{projectId},message:'A project was duplicated.',actionNeeded:false,safeActionRoute:`/projects/${projectId}`,createdAt:now},{session});
+      const snapshot=this.detail(record,await this.names([record],db,session));
+      await db.collection<Row>('project_duplicate_commands').insertOne({_id:receiptId,...identity,sourceRevision:source.revision,requestHash,projectId,snapshot,createdAt:now},{session});
+      return {project:snapshot,replayed:false};
+    });}catch(error){if(error&&typeof error==='object'&&'code'in error&&error.code===11000){await this.authorize();const prior=await replay(this.db);if(prior)return prior;}throw error;}
   }
 
   async patch(id: string, raw: unknown, key: string): Promise<{project: ProjectDetail; replayed: boolean}> {
