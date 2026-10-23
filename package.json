@@ -32,7 +32,8 @@
     "verify:media": "tsx scripts/verify-media.ts",
     "web:planning": "npm --prefix apps/web run planning --",
     "web:generation": "npm --prefix apps/web run generation --",
-    "web:storage": "npm --prefix apps/web run storage --"
+    "web:storage": "npm --prefix apps/web run storage --",
+    "web:cleanup": "npm --prefix apps/web run cleanup --"
   },
   "dependencies": {
     "@echogarden/espeak-ng-emscripten": "^0.3.0",

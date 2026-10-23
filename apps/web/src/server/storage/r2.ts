@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {S3Client, GetObjectCommand, PutObjectCommand} from '@aws-sdk/client-s3';
+import {S3Client, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand} from '@aws-sdk/client-s3';
 import {Readable} from 'node:stream';
 import {StorageFault, storageFiles, type ObjectStore, type StorageObject} from './contracts';
 export const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
@@ -24,6 +24,18 @@ export class R2ObjectStore implements ObjectStore {
       requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED', credentials: {accessKeyId: s.accessKeyId, secretAccessKey: s.secretAccessKey}});
   }
   close() {this.client.destroy();}
+  async remove(object:StorageObject){
+    const file=storageFiles[object.kind];
+    if(!file||object.mime!==file.mime||!Number.isSafeInteger(object.size)||object.size<1||object.size>file.max||!/^[a-f0-9]{64}$/.test(object.sha256)||!/^workspaces\/[a-f0-9-]{36}\/projects\/[a-f0-9-]{36}\/runs\/[a-f0-9-]{36}\/bundles\/[a-f0-9-]{36}\/[a-z0-9.]+$/.test(object.key)||!object.key.endsWith('/'+file.name))throw new StorageFault('STORAGE_BYTES_CHANGED');
+    try{
+      await this.client.send(new DeleteObjectCommand({Bucket:this.bucket,Key:object.key}),{abortSignal:AbortSignal.timeout(30000)});
+      try{await this.client.send(new HeadObjectCommand({Bucket:this.bucket,Key:object.key}),{abortSignal:AbortSignal.timeout(30000)});}catch(error){
+        if(error&&typeof error==='object'&&'$metadata'in error&&'name'in error&&['NotFound','NoSuchKey'].includes(String(error.name))&&(error.$metadata as {httpStatusCode?:number})?.httpStatusCode===404)return;
+        throw error;
+      }
+    }catch{throw new StorageFault('OBJECT_REMOVAL_FAILED');}
+    throw new StorageFault('OBJECT_REMOVAL_FAILED');
+  }
   async ensure(object: StorageObject, bytes: Buffer) {
     verifyObject(object, bytes);
     // Every retry is create-only at the same immutable key. A negative read

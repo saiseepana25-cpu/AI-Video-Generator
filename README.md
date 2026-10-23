@@ -1,5 +1,23 @@
 # VideoCraft
 
+## Ready-media cleanup for deleted projects (F14c3)
+
+Apply migration 021 with `npm.cmd run web:db:migrate`, then audit with `npm.cmd run web:db:check`. The dashboard does **not** start cleanup automatically. The operator-local commands are:
+
+```text
+npm.cmd run web:cleanup -- status <deleted-project-id>
+npm.cmd run web:cleanup -- project <deleted-project-id>
+npm.cmd run web:cleanup -- worker
+```
+
+`status` reads coarse owned-ready-asset counts without R2 credentials/network access. `project` processes at most 100 eligible assets in the configured R2 destination; run status afterward and repeat for larger histories. `worker` polls every five seconds; Ctrl+C finishes the current bounded operation and stops. These commands physically remove eligible ready-video objects for **already deleted** projects, including MP4/SRT/input/timing/manifest; they are not dry runs. Use the existing server-only R2 settings and object deletion permission. No operator command creates a project tombstone or bypasses active work/reference checks.
+
+Each object must match the deleted project's exact ready-video/bundle/run/key/config identity and have no surviving/unknown owner. A transaction releases that ready owner's reference, writes `deleting` under the shared reference guard and checkpoints the exact descriptor. The worker deletes only that key and requires missing-object HEAD; then asset/task finalization commits together. Unknown/failed deletion or lost metadata acknowledgement retries the same immutable key, never uploads/renders replacements. Durable remote-failure retries back off 60 seconds; invalid ownership/configuration is refused and discovery backs off that asset in memory for 60 seconds. Logs are sanitized. Concurrent workers may issue the same deterministic idempotent removal; reference revisions fence their metadata finalization. There is no lease-based render takeover.
+
+The configured endpoint/bucket/access-key identity must match the stored configuration fingerprint. Changed destination/identity, active or uncertain work, shared/aliased references and publication payloads require operator review rather than automatic deletion. Generic future pin writers must use the asset guard and refuse deleting/deleted. Migration 021 supports the current sole ready-video owner; it does not implement a general shared-media reference framework.
+
+The deleted-project page and receipt GET show current owned ready-media progress separately from immutable delete-command receipts. **Local speech/render files, source/approval/history records, shared branding/logos, stored-but-unpromoted bundles and orphan objects remain retained.** `ready_media_removed` confirms only owned ready files; `no_ready_media` does not establish that a project has no other data. Active-executor cancellation and broader cleanup remain pending. Unit/isolated-database tests use stubbed storage; no real R2 deletion acceptance has been performed for this increment.
+
 ## Shared workspace defaults (F13a)
 
 Settings now saves the team's default English/Telugu language, 30/60/90-second length, separate verified voice/accent and IANA timezone. Both voice controls can stay unselected. Saves require the current workspace revision and preserve the exact command if the outcome is unconfirmed; Check same settings save resolves it. Reload saved settings replaces unsaved form edits. The existing educational theme and readable captions stay curated.

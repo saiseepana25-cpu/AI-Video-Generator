@@ -1,5 +1,9 @@
 # VideoCraft — V1 System Design
 
+## F14c3 execution increment — reference-fenced ready-media cleanup
+
+A separate operator-local worker removes owned ready-video R2 objects for tombstoned projects. It proves exact project/video/bundle/run/config/key identity and no surviving references/unresolved work, then atomically releases the sole implemented ready-video ownership pin under asset referenceRevision and project guard writes with a durable task. Network removal is exact-key and idempotent, outside transactions; missing-object HEAD is required. CAS finalization rechecks proof, and failures resume the same descriptor without rerendering or releasing an executor slot. Migration 021 adds strict checkpoints and refCount/lifecycle constraints; public deletion status projects coarse ready-media counts while immutable delete receipts remain original. Local speech/render files, source records, shared brand/logo/reuse ownership, unpromoted/orphan objects and active-executor cancellation remain retained or pending. No cleanup worker starts automatically with the dashboard.
+
 ## F14c2 execution increment — acknowledged unstarted-work cancellation
 
 The deletion confirmation now reads an authorized snapshot of queued impact and requires a separate acknowledgement bound to project guardRevision. Only never-started, unowned/unleased, zero-submission queued jobs/runs without provider-attempt evidence are cancellable. Exact job/run writes and the shared project guard serialize against worker claim; cancellation, conservative unused speech-hold settlement, tombstone, member fence, activity and permanent command receipt commit together. Rollback restores all of them. No external I/O, migration, renderer termination assumption or operator-gate change is introduced. Running/uncertain work, storage and publishing remain blocked. Physical cleanup and active-executor cancellation remain subsequent increments.

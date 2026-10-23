@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Readable} from 'node:stream';
-import {GetObjectCommand, PutObjectCommand, type S3Client} from '@aws-sdk/client-s3';
+import {GetObjectCommand, PutObjectCommand, DeleteObjectCommand, HeadObjectCommand, type S3Client} from '@aws-sdk/client-s3';
 import {R2ObjectStore, r2Settings, sha256} from '../src/server/storage/r2';
 import type {StorageObject} from '../src/server/storage/contracts';
 const env = {R2_ACCOUNT_ID: 'a'.repeat(32), R2_ENDPOINT: `https://${'a'.repeat(32)}.r2.cloudflarestorage.com`, R2_BUCKET_NAME: 'test-private', R2_ACCESS_KEY_ID: 'test-id', R2_SECRET_ACCESS_KEY: 'test-secret', R2_REGION: 'auto'};
@@ -12,6 +12,16 @@ const body = (bytes = data) => ({Body: Readable.from([bytes]), ContentLength: da
 test('R2 settings refuse arbitrary endpoints, credentials in URLs and non-auto region', () => {
   assert.ok(r2Settings(env));
   for (const patch of [{R2_ENDPOINT: 'https://example.com'}, {R2_ENDPOINT: env.R2_ENDPOINT + '/path'}, {R2_REGION: 'us-east-1'}, {R2_BUCKET_NAME: '../private'}, {R2_SECRET_ACCESS_KEY: ''}]) assert.throws(() => r2Settings({...env, ...patch}), /STORAGE_CONFIGURATION_REQUIRED/);
+});
+test('R2 cleanup deletes only an exact key and requires a verified missing-object response',async()=>{
+  const commands:unknown[]=[];await gateway(async command=>{commands.push(command);assert.ok(command instanceof DeleteObjectCommand||command instanceof HeadObjectCommand);assert.equal(command.input.Key,object.key);assert.equal(command.input.Bucket,'test-private');if(command instanceof HeadObjectCommand)throw {name:'NotFound',$metadata:{httpStatusCode:404}};return {};}).remove(object);assert.equal(commands.length,2);
+});
+test('R2 cleanup does not accept forbidden, unknown, missing-bucket or still-present outcomes',async()=>{
+  for(const failure of [{name:'AccessDenied',$metadata:{httpStatusCode:403}},{name:'NoSuchBucket',$metadata:{httpStatusCode:404}},new Error('Private transport detail'),null])await assert.rejects(gateway(async command=>{if(command instanceof DeleteObjectCommand)return {};if(failure)throw failure;return {};}).remove(object),/^Error: OBJECT_REMOVAL_FAILED$/);
+  await assert.rejects(gateway(async()=>{throw new Error('delete failed');}).remove(object),/OBJECT_REMOVAL_FAILED/);
+});
+test('R2 cleanup rejects unsafe keys and descriptors before network access',async()=>{
+  let calls=0;const store=gateway(async()=>{calls++;return {};});for(const patch of [{key:'../captions.srt'},{key:object.key+'/other'},{size:NaN},{mime:'text/html'},{sha256:'invalid'}])await assert.rejects(store.remove({...object,...patch}));assert.equal(calls,0);
 });
 test('R2 uses a conditional single-key PUT then verifies actual read-back bytes', async () => {
   const commands: unknown[] = [];

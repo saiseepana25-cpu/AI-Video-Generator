@@ -6,7 +6,8 @@ import {assertVoiceSelection} from '../providers/catalog';
 import {readBrandSelection} from '../brand/selection';
 import type {Env} from '../providers/contracts';
 import type {Job,PlanVersion} from '../planning/contracts';
-import type {DeleteInput,DeletionReceipt} from './deletion';
+import type {DeleteInput,DeletionReceipt,DeletionStatus} from './deletion';
+import {mediaCleanupStatus} from '../cleanup/service';
 import {deleteQuery,parseDeleteInput} from './deletion';
 import {inspectDeletionWork,cancelUnstartedDeletionWork} from './deletion-work';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
@@ -70,12 +71,12 @@ export class ProjectService {
     return this.detail(row, await this.names([row]));
   }
 
-  async deletionStatus(id:string):Promise<DeletionReceipt>{
+  async deletionStatus(id:string):Promise<DeletionStatus>{
     await this.authorize();requireProjectId(id);
     const row=await this.db.collection<Row>('projects').findOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:{$ne:null}},{projection:{deletionReceipt:1}});
     if(!row?.deletionReceipt)throw notFound();
     // Deliberately excludes title, source content, storage addresses and actor identity.
-    return row.deletionReceipt as DeletionReceipt;
+    return {...row.deletionReceipt as DeletionReceipt,mediaCleanup:await mediaCleanupStatus(this.db,this.context.workspaceId,id)};
   }
 
   async deletionImpact(id:string){
@@ -93,7 +94,7 @@ export class ProjectService {
     input=parseDeleteInput(deleteQuery(input));
     const identity={workspaceId:this.context.workspaceId,userId:this.context.userId,projectId:id,keyHash:hash(key)},requestHash=hash(JSON.stringify(input));
     const now=new Date(),receiptId=randomUUID(),eventId=randomUUID(),actor={kind:'user' as const,userId:this.context.userId};
-    const receipt:DeletionReceipt={projectId:id,accessRemoved:true,cleanupState:'retained',cleanupJobId:null,externalPublicationState:'none_pending',message:'Project removed from team access. Files and records are retained; physical cleanup is not implemented yet.'};
+    const receipt:DeletionReceipt={projectId:id,accessRemoved:true,cleanupState:'retained',cleanupJobId:null,externalPublicationState:'none_pending',message:'Project removed from team access. Files and records remain retained until eligible cleanup is confirmed.'};
     const replay=async(db:Db,session?:ClientSession)=>{
       const row=await db.collection<Row>('project_delete_commands').findOne(identity,{session});if(!row)return null;
       if(row.requestHash!==requestHash)throw new ProjectError('IDEMPOTENCY_MISMATCH',409,'This request key was used for a different deletion.');

@@ -1,7 +1,9 @@
 import {ProjectError} from './contracts';
+import type {MediaCleanupStatus} from '../cleanup/contracts';
 export type DeleteInput={expectedProjectRevision:number;acknowledgeActiveWork?:true;expectedWorkRevision?:number};
 export type DeletionImpact={projectId:string;projectRevision:number;workRevision:number;queuedPlanning:number;queuedGenerations:number;canDelete:boolean;blockReason:string|null};
 export type DeletionReceipt={projectId:string;accessRemoved:true;cleanupState:'retained';cleanupJobId:null;externalPublicationState:'none_pending';message:string};
+export type DeletionStatus=DeletionReceipt&{mediaCleanup:MediaCleanupStatus};
 export function parseDeleteInput(params:URLSearchParams):DeleteInput {
   for(const key of params.keys())if(!['expectedProjectRevision','acknowledgeActiveWork','expectedWorkRevision'].includes(key)||params.getAll(key).length!==1)throw new ProjectError('INVALID_QUERY',400,'Use only the documented deletion fields once each.');
   const value=params.get('expectedProjectRevision');

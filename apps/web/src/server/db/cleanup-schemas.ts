@@ -1,0 +1,10 @@
+import type {Document} from 'mongodb';
+import type {CollectionContract} from './schemas';
+import {videoCollections} from './video-schemas';
+const assets=structuredClone(videoCollections.find(c=>c.name==='video_assets')!);
+assets.validator.$jsonSchema.properties.refCount={bsonType:['int','long','double'],enum:[0,1]};
+assets.validator.$or=[{lifecycleState:{$in:['available','unavailable']},refCount:1},{lifecycleState:{$in:['deleting','deleted']},refCount:0}];
+assets.indexes.push({key:{workspaceId:1,projectId:1,lifecycleState:1},name:'video_asset_cleanup_scope_v1'});
+const uuid={bsonType:'string',pattern:'^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'},hash={bsonType:'string',pattern:'^[a-f0-9]{64}$'},long={bsonType:'long',minimum:1,maximum:Number.MAX_SAFE_INTEGER},date={bsonType:'date'};
+const obj=(properties:Record<string,Document>)=>({bsonType:'object',additionalProperties:false,required:Object.keys(properties),properties});
+export const cleanupCollections:CollectionContract[]=[assets,{name:'media_cleanup_tasks',validator:{$jsonSchema:obj({_id:uuid,workspaceId:uuid,projectId:uuid,videoId:uuid,bundleId:uuid,configHash:hash,bucket:{bsonType:'string',minLength:3,maxLength:63},object:structuredClone(assets.validator.$jsonSchema.properties.object),referenceRevision:long,attempts:long,state:{enum:['pending','retry','deleted']},error:{enum:[null,'OBJECT_REMOVAL_FAILED']},createdAt:date,updatedAt:date,deletedAt:{bsonType:['date','null']},nextAttemptAt:date})},indexes:[{key:{workspaceId:1,projectId:1,state:1},name:'media_cleanup_project_v1'}]}];

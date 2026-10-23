@@ -69,7 +69,7 @@ describe('guarded idle project tombstones',{concurrency:false},()=>{
   test('hides an idle project without removing content, assets or related copies',async()=>{
     const copy=(await service.duplicate(source._id,input(),randomUUID())).project;
     const result=await service.delete(source._id,input(),randomUUID());assert.equal(result.receipt.cleanupState,'retained');assert.equal(result.receipt.cleanupJobId,null);
-    assert.deepEqual(await service.deletionStatus(source._id),result.receipt);assert.ok(!JSON.stringify(result.receipt).includes(source.displayTitle));
+    const {mediaCleanup,...originalReceipt}=await service.deletionStatus(source._id);assert.deepEqual(originalReceipt,result.receipt);assert.equal(mediaCleanup.state,'no_ready_media');assert.ok(!JSON.stringify(result.receipt).includes(source.displayTitle));
     await assert.rejects(service.get(source._id),{status:404});assert.deepEqual((await service.list({q:'',limit:20,cursor:null,order:'updated_desc'})).items.map(p=>p.id),[copy.id]);
     const row=await db.collection<Row>('projects').findOne({_id:source._id});assert.deepEqual(row!.brief,source.brief);assert.equal(row!.revision.toString(),'2');assert.equal(row!.briefRevision.toString(),'1');assert.equal(row!.guardRevision.toString(),'2');assert.ok(row!.deletedAt instanceof Date);assert.deepEqual((await service.get(copy.id)).brief,source.brief);
     assert.equal(await db.collection('activity_events').countDocuments({type:'project_deleted'}),1);await checkDatabase(db);

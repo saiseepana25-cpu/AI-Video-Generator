@@ -20,6 +20,7 @@ import {brandLogoCollections} from './brand-logo-schemas';
 import {logoCollections} from './logo-schemas';
 import {duplicateCollections} from './duplicate-schemas';
 import {deletionCollections} from './deletion-schemas';
+import {cleanupCollections} from './cleanup-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -58,6 +59,7 @@ const migrations = [
   {definition:{id:'018_personal_preferences',description:'Scoped personal preference replay and separate accent selection',contracts:preferencesCollections},checksum:createHash('sha256').update(JSON.stringify(preferencesCollections)).digest('hex')},
   {definition:{id:'019_project_duplication',description:'Permanent duplication receipts and independent copied plan provenance',contracts:duplicateCollections},checksum:createHash('sha256').update(JSON.stringify(duplicateCollections)).digest('hex')},
   {definition:{id:'020_project_tombstones',description:'Guarded idle project access removal and permanent minimal deletion receipts',contracts:deletionCollections},checksum:createHash('sha256').update(JSON.stringify(deletionCollections)).digest('hex')},
+  {definition:{id:'021_ready_media_cleanup',description:'Reference-fenced ready-media cleanup checkpoints and released ownership lifecycle',contracts:cleanupCollections},checksum:createHash('sha256').update(JSON.stringify(cleanupCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

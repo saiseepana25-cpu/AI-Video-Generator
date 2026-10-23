@@ -25,6 +25,9 @@ import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, te
 import {providerEnv, providerFixture} from './fixtures/providers';
 import {pins, renderFixture} from './fixtures/rendering';
 import {StorageService} from '../src/server/storage/service';
+import {MediaCleanupService} from '../src/server/cleanup/service';
+import {cleanupCollections} from '../src/server/db/cleanup-schemas';
+import {ProjectService} from '../src/server/projects/service';
 import {storageKinds, StorageFault, type StorageBundle, type StorageKind, type StorageObject} from '../src/server/storage/contracts';
 import {sha256, verifyObject} from '../src/server/storage/r2';
 import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
@@ -54,7 +57,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -320,6 +323,34 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal(engine.speechCalls, 3); assert.equal(engine.renderCalls, 1);
     assert.equal(await db.collection('activity_events').countDocuments({dedupeKey: `storage:${bundle._id}:stored`}), 1); await checkDatabase(db);
   });
+  async function cleanupSetup(deleted=true){
+    const setup=await storageSetup();await setup.storage.prepare(setup.current._id);await setup.storage.tick();
+    const projects=new ProjectService(client,name,context,'cleanup-test-secret-'.repeat(3));
+    if(deleted){const current=await projects.get(projectId);await projects.delete(projectId,{expectedProjectRevision:current.revision},randomUUID());}
+    const removed:string[]=[],adapter={configHash:setup.store.configHash,bucket:setup.store.bucket,hook:undefined as undefined|(()=>Promise<void>),async remove(object:StorageObject){removed.push(object.key);setup.store.objects.delete(object.key);await this.hook?.();}};
+    const cleanup=new MediaCleanupService(client,name,adapter),assets=await db.collection<Row>('video_assets').find({projectId}).sort({_id:1}).toArray();return {...setup,projects,adapter,removed,cleanup,assets};
+  }
+  test('cleanup removes five owned ready objects while preserving source metadata and shared namespaces',async()=>{
+    const {cleanup,store,removed,projects}=await cleanupSetup();store.objects.set('shared-brand/logo.png',Buffer.from('retained'));
+    while(await cleanup.next(projectId)){}assert.equal(removed.length,5);assert.deepEqual([...store.objects.keys()],['shared-brand/logo.png']);assert.equal(await db.collection('video_assets').countDocuments({projectId,lifecycleState:'deleted',refCount:0}),5);assert.equal(await db.collection('media_cleanup_tasks').countDocuments({projectId,state:'deleted'}),5);
+    const status=await projects.deletionStatus(projectId);assert.equal(status.mediaCleanup.state,'ready_media_removed');assert.equal(status.mediaCleanup.retainedContent,true);assert.ok(!JSON.stringify(status).includes('workspaces/'));assert.equal(await db.collection('generation_speech_attempts').countDocuments({}),3);assert.equal(await db.collection('generation_local_artifacts').countDocuments({}),1);assert.equal(engine.renderCalls,1);await checkDatabase(db);
+  });
+  test('cleanup refuses live projects, shared refs, wrong destination and redirected object keys',async()=>{
+    const {cleanup,adapter,projects,assets,removed}=await cleanupSetup(false),asset=assets[0];await assert.rejects(cleanup.clean(asset._id),/CLEANUP_OWNERSHIP_UNAVAILABLE/);const p=await projects.get(projectId);await projects.delete(projectId,{expectedProjectRevision:p.revision},randomUUID());
+    await db.collection('asset_refs').insertOne({assetId:asset._id,owner:'another-project'});await assert.rejects(cleanup.clean(asset._id));await db.collection('asset_refs').deleteMany({});await assert.rejects(new MediaCleanupService(client,name,{...adapter,configHash:'f'.repeat(64)}).clean(asset._id));
+    await db.collection<Row>('video_assets').updateOne({_id:asset._id},{$set:{'object.key':'workspaces/other-project/video.mp4'}});await assert.rejects(cleanup.clean(asset._id));assert.deepEqual(removed,[]);assert.equal(await db.collection('media_cleanup_tasks').countDocuments(),0);
+  });
+  test('uncertain object removal leaves a retry checkpoint and reuses exactly the same immutable key',async()=>{
+    const {cleanup,adapter,assets,removed,projects}=await cleanupSetup(),id=assets[0]._id;adapter.hook=async()=>{throw new Error('Private network detail');};await assert.rejects(cleanup.clean(id),/OBJECT_REMOVAL_FAILED/);assert.equal((await db.collection<Row>('video_assets').findOne({_id:id}))!.lifecycleState,'deleting');assert.equal((await db.collection<Row>('media_cleanup_tasks').findOne({_id:id}))!.error,'OBJECT_REMOVAL_FAILED');assert.equal((await projects.deletionStatus(projectId)).mediaCleanup.state,'retry_required');
+    adapter.hook=undefined;assert.equal(await new MediaCleanupService(client,name,adapter).clean(id),true);assert.equal(await cleanup.clean(id),false);assert.equal(new Set(removed).size,1);assert.equal(removed.length,2);assert.equal((await db.collection<Row>('media_cleanup_tasks').findOne({_id:id}))!.attempts.toString(),'2');
+  });
+  test('a failed metadata finalization resumes removal without resurrecting bytes or rerendering',async()=>{
+    const {cleanup,adapter,assets,removed}=await cleanupSetup(),id=assets[0]._id;adapter.hook=async()=>{await db.command({collMod:'media_cleanup_tasks',validator:{$and:[cleanupCollections[1].validator,{state:{$ne:'deleted'}}]}});};
+    try{await assert.rejects(cleanup.clean(id));}finally{await db.command({collMod:'media_cleanup_tasks',validator:cleanupCollections[1].validator});}assert.equal((await db.collection<Row>('media_cleanup_tasks').findOne({_id:id}))!.state,'pending');adapter.hook=undefined;assert.equal(await new MediaCleanupService(client,name,adapter).clean(id),true);assert.equal(removed.length,2);assert.equal(engine.renderCalls,1);
+  });
+  test('concurrent cleanup checkpoints can only finish the same immutable object',async()=>{
+    const {cleanup,adapter,assets,removed}=await cleanupSetup(),id=assets[0]._id;await Promise.all([cleanup.clean(id),new MediaCleanupService(client,name,adapter).clean(id)]);assert.ok(removed.length>=1&&removed.length<=2);assert.equal(new Set(removed).size,1);assert.equal((await db.collection<Row>('video_assets').findOne({_id:id}))!.lifecycleState,'deleted');assert.equal(await db.collection<Row>('media_cleanup_tasks').countDocuments({_id:id,state:'deleted'}),1);
+  });
   test('partial storage failure retries the exact keys/bytes without new speech/rendering', async () => {
     const {storage, store, current} = await storageSetup(); const bundle = await storage.prepare(current._id);
     store.hook = async () => {if (store.calls === 3) throw new Error('Private provider details');};
@@ -432,7 +463,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!, key = bundle.objects.find(o => o.kind === 'srt')!.key;
     const original = store.objects.get(key)!; store.objects.set(key, Buffer.from('substituted captions'));
     await assert.rejects(videos.download(id,'srt',null), /temporarily unavailable/); store.objects.set(key,original);
-    await db.collection<Row>('video_assets').updateOne({videoId:id,'object.kind':'srt'},{$set:{lifecycleState:'deleting'}});
+    await db.collection<Row>('video_assets').updateOne({videoId:id,'object.kind':'srt'},{$set:{lifecycleState:'deleting',refCount:0}});
     await assert.rejects(videos.download(id,'srt',null), /temporarily unavailable/);
     assert.equal((await videos.download(id,'mp4',null)).status,200);
   });
@@ -466,7 +497,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const bundle = (await db.collection<StorageBundle>('generation_storage_bundles').findOne({}))!, key = bundle.objects.find(o => o.kind === 'mp4')!.key;
     const original = store.objects.get(key)!; store.objects.set(key, Buffer.from('bad')); await assert.rejects(videos.playback(view.id,null), /temporarily unavailable/); store.objects.set(key,original);
     await assert.rejects(new VideoService(client,name,context,{...store,configHash:'b'.repeat(64)}).get(view.id), /temporarily unavailable/);
-    await db.collection<Row>('video_assets').updateOne({videoId: view.id, 'object.kind':'mp4'}, {$set: {lifecycleState: 'deleting'}}); await assert.rejects(videos.playback(view.id,null), /temporarily unavailable/);
+    await db.collection<Row>('video_assets').updateOne({videoId: view.id, 'object.kind':'mp4'}, {$set: {lifecycleState: 'deleting',refCount:0}}); await assert.rejects(videos.playback(view.id,null), /temporarily unavailable/);
   });
   test('revocation or deletion during remote retrieval wins before a playback body is returned', async () => {
     const {storage, store, current} = await storageSetup(); await storage.prepare(current._id); await storage.tick();
