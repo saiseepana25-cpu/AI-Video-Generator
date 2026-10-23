@@ -6,6 +6,11 @@ import {databaseClientOptions} from '../src/server/db/connection';
 import {migrateDatabase,checkDatabase} from '../src/server/db/migrations';
 import {deletionCollections} from '../src/server/db/deletion-schemas';
 import {ProjectService} from '../src/server/projects/service';
+import {databaseTransaction} from '../src/server/db/transactions';
+import type {GenerationRun} from '../src/server/generation/contracts';
+import type {ProviderControl} from '../src/server/providers/contracts';
+import type {Job} from '../src/server/planning/contracts';
+import {providerFixture} from './fixtures/providers';
 import {workspaceFixture,membershipFixture,projectFixture,testWorkspaceId,testUserId,type Row} from './fixtures/database';
 const uri=process.env.MONGODB_TEST_URI??'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
 if(!/^mongodb:\/\/(127\.0\.0\.1|localhost):\d+\/(?:\?[^\s]*)?$/.test(uri))throw new Error('Isolated loopback replica set required.');
@@ -13,9 +18,54 @@ const client=new MongoClient(uri,databaseClientOptions),name=`videocraft_delete_
 describe('guarded idle project tombstones',{concurrency:false},()=>{
   let db:Db,service:ProjectService,source:Row;
   before(async()=>{await client.connect();db=client.db(name);await migrateDatabase(db);});
-  beforeEach(async()=>{for(const c of ['projects','project_delete_commands','project_duplicate_commands','memberships','workspaces','activity_events','jobs','generation_runs','generation_storage_bundles'])await db.collection(c).deleteMany({});await db.collection<Row>('workspaces').insertOne(workspaceFixture());await db.collection<Row>('memberships').insertOne(membershipFixture());source=projectFixture();await db.collection<Row>('projects').insertOne(source);service=new ProjectService(client,name,context,secret);});
+  beforeEach(async()=>{for(const c of ['projects','project_delete_commands','project_duplicate_commands','memberships','workspaces','activity_events','jobs','generation_runs','generation_storage_bundles','stage_attempts','generation_speech_attempts','provider_controls'])await db.collection(c).deleteMany({});await db.collection<Row>('workspaces').insertOne(workspaceFixture());await db.collection<Row>('memberships').insertOne(membershipFixture());source=projectFixture();await db.collection<Row>('projects').insertOne(source);service=new ProjectService(client,name,context,secret);});
   after(async()=>{try{if(!/^videocraft_delete_test_[a-f0-9]{32}$/.test(name))throw new Error('Unsafe cleanup');await db.dropDatabase();}finally{await client.close();}});
   const input=()=>({expectedProjectRevision:1});
+  async function queued(){
+    const provider=providerFixture(),now=new Date(),run:GenerationRun={_id:randomUUID(),schemaVersion:1,workspaceId:testWorkspaceId,projectId:source._id,planVersionId:randomUUID(),approvalId:randomUUID(),jobId:randomUUID(),inputHash:'a'.repeat(64),settingsSnapshotHash:'b'.repeat(64),sourceBriefRevision:Long.ONE,providerConfigHash:provider.configHash,reservationId:randomUUID(),reservationPeriodId:provider.allowance.periodId,rendererBuildHash:'c'.repeat(64),state:'queued',statusRevision:Long.ONE,createdAt:now,updatedAt:now,finishedAt:null,createdBy:testUserId};
+    provider.allowance.observedRemaining=900;provider.reservations=[{id:run.reservationId,units:100,state:'reserved',createdAt:now}];
+    const job:Job={_id:randomUUID(),schemaVersion:1,workspaceId:testWorkspaceId,projectId:source._id,userId:testUserId,kind:'plan',keyHash:'d'.repeat(64),requestHash:'e'.repeat(64),requestId:randomUUID(),inputHash:'f'.repeat(64),sourceBriefRevision:Long.ONE,input:{brief:source.brief,settings:source.settings},state:'queued',statusRevision:Long.ONE,attempt:0,submission:'none',owner:null,leaseUntil:null,createdAt:now,updatedAt:now,startedAt:null,finishedAt:null,result:null,error:null};
+    await db.collection<ProviderControl>('provider_controls').insertOne(provider);await db.collection<GenerationRun>('generation_runs').insertOne(run);await db.collection<Job>('jobs').insertOne(job);await db.collection<Row>('projects').updateOne({_id:source._id},{$set:{activePlanningJobId:job._id,latestRunId:run._id}});
+    return {run,job,provider};
+  }
+  const acknowledge=(workRevision:number)=>({...input(),acknowledgeActiveWork:true as const,expectedWorkRevision:workRevision});
+  test('impact is read-only, sanitized and requires acknowledgement before cancelling queued work',async()=>{
+    const {provider}=await queued(),before=await db.collection<Row>('projects').findOne({_id:source._id}),impact=await service.deletionImpact(source._id);
+    assert.deepEqual(impact,{projectId:source._id,projectRevision:1,workRevision:0,queuedPlanning:1,queuedGenerations:1,canDelete:true,blockReason:null});assert.ok(!JSON.stringify(impact).includes(provider.configHash));assert.deepEqual(await db.collection<Row>('projects').findOne({_id:source._id}),before);
+    await assert.rejects(service.delete(source._id,input(),randomUUID()),{code:'ACTIVE_WORK_ACK_REQUIRED'});assert.deepEqual(await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}),provider);assert.equal(await db.collection('project_delete_commands').countDocuments(),0);
+  });
+  test('acknowledged deletion cancels only unstarted work and closes one unused reservation exactly once',async()=>{
+    const {run,job}=await queued(),key=randomUUID(),impact=await service.deletionImpact(source._id),command=acknowledge(impact.workRevision);const result=await service.delete(source._id,command,key);
+    assert.equal((await db.collection<Job>('jobs').findOne({_id:job._id}))!.state,'cancelled');assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:run._id}))!.state,'cancelled');const provider=(await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}))!;assert.equal(provider.allowance.observedRemaining,1000);assert.equal(provider.reservations.length,0);
+    const project=(await db.collection<Row>('projects').findOne({_id:source._id}))!;assert.equal(project.activePlanningJobId,null);assert.equal(project.latestRunId,null);assert.equal(project.revision.toString(),'2');assert.equal(project.guardRevision.toString(),'1');assert.equal((await service.delete(source._id,command,key)).replayed,true);assert.deepEqual((await service.delete(source._id,command,key)).receipt,result.receipt);assert.deepEqual(await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}),provider);await checkDatabase(db);
+  });
+  test('changed work revision refuses the old acknowledgement without cancelling anything',async()=>{
+    const {run,job}=await queued(),impact=await service.deletionImpact(source._id);await db.collection<Row>('projects').updateOne({_id:source._id},{$inc:{guardRevision:Long.ONE}});await assert.rejects(service.delete(source._id,acknowledge(impact.workRevision),randomUUID()),{code:'STALE_WORK'});assert.equal((await db.collection<Job>('jobs').findOne({_id:job._id}))!.state,'queued');assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:run._id}))!.state,'queued');
+  });
+  test('receipt failure rolls back queued cancellations and allowance settlement',async()=>{
+    const {run,job,provider}=await queued();await db.command({collMod:'project_delete_commands',validator:{$jsonSchema:{bsonType:'object',required:['controlled_failure']}}});try{await assert.rejects(service.delete(source._id,acknowledge(0),randomUUID()));}finally{await db.command({collMod:'project_delete_commands',validator:deletionCollections[2].validator});}
+    assert.deepEqual(await db.collection<GenerationRun>('generation_runs').findOne({_id:run._id}),run);assert.deepEqual(await db.collection<Job>('jobs').findOne({_id:job._id}),job);assert.deepEqual(await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}),provider);assert.equal((await service.get(source._id)).revision,1);assert.equal(await db.collection('activity_events').countDocuments(),0);
+  });
+  test('attempt evidence and uncertain holds refuse a queued label without any refund',async()=>{
+    const {run,job}=await queued();await db.collection<Row>('stage_attempts').insertOne({_id:randomUUID(),jobId:job._id,attempt:1,owner:randomUUID(),state:'submitted',submittedAt:new Date(),finishedAt:null});assert.equal((await service.deletionImpact(source._id)).canDelete,false);await assert.rejects(service.delete(source._id,acknowledge(0),randomUUID()),{code:'PROJECT_WORK_UNRESOLVED'});await db.collection('stage_attempts').deleteMany({});
+    await db.collection<Row>('generation_speech_attempts').insertOne({_id:randomUUID(),runId:run._id},{bypassDocumentValidation:true});await assert.rejects(service.delete(source._id,acknowledge(0),randomUUID()),{code:'PROJECT_WORK_UNRESOLVED'});await db.collection('generation_speech_attempts').deleteMany({});
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{'reservations.0.state':'uncertain'}});await assert.rejects(service.delete(source._id,acknowledge(0),randomUUID()),{code:'PROJECT_WORK_UNRESOLVED'});assert.equal((await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}))!.allowance.observedRemaining,900);
+  });
+  test('worker claim versus deletion cannot leave a running executor on a tombstoned project',async()=>{
+    const {run}=await queued(),owner=randomUUID(),now=new Date();
+    const claim=()=>databaseTransaction(client,name,async(db,session)=>{
+      const project=await db.collection<Row>('projects').findOne({_id:source._id,deletedAt:null},{session});if(!project)return false;
+      const update=await db.collection<GenerationRun>('generation_runs').updateOne({_id:run._id,state:'queued'},{$set:{state:'running',owner,leaseEpoch:Long.ONE,leaseUntil:new Date(now.getTime()+90000),startedAt:now,stage:'plan_validation',submissionCount:0,artifactId:null,error:null}},{session});if(!update.matchedCount)return false;
+      await db.collection<Row>('projects').updateOne({_id:source._id,deletedAt:null},{$inc:{guardRevision:Long.ONE}},{session});return true;
+    });
+    const results=await Promise.allSettled([service.delete(source._id,acknowledge(0),randomUUID()),claim()]);const project=await db.collection<Row>('projects').findOne({_id:source._id}),actual=await db.collection<GenerationRun>('generation_runs').findOne({_id:run._id});if(project!.deletedAt){assert.equal(actual!.state,'cancelled');assert.equal(results[1].status,'fulfilled');if(results[1].status==='fulfilled')assert.equal(results[1].value,false);}else{assert.equal(actual!.state,'running');assert.equal(results[0].status,'rejected');}
+  });
+  test('queued cancellation preserves provider disablement and does not refund a different accounting period',async()=>{
+    await queued();await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{state:'disabled',operatorDisabled:true,'allowance.periodId':'new-period'}});await service.delete(source._id,acknowledge(0),randomUUID());const provider=(await db.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs'}))!;assert.equal(provider.state,'disabled');assert.equal(provider.operatorDisabled,true);assert.equal(provider.allowance.observedRemaining,900);assert.deepEqual(provider.reservations,[]);
+  });
+  test('impact refuses missing, foreign, deleted or inactive scope',async()=>{
+    await assert.rejects(service.deletionImpact(randomUUID()),{status:404});const id=source._id;await service.delete(id,input(),randomUUID());await assert.rejects(service.deletionImpact(id),{status:404});await db.collection<Row>('memberships').updateOne({userId:testUserId},{$set:{status:'disabled',disabledAt:new Date(),disabledBy:{kind:'user',userId:testUserId}}});await assert.rejects(service.deletionImpact(id),{status:403});
+  });
   test('hides an idle project without removing content, assets or related copies',async()=>{
     const copy=(await service.duplicate(source._id,input(),randomUUID())).project;
     const result=await service.delete(source._id,input(),randomUUID());assert.equal(result.receipt.cleanupState,'retained');assert.equal(result.receipt.cleanupJobId,null);

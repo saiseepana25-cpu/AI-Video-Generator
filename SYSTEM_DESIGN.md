@@ -1,5 +1,9 @@
 # VideoCraft — V1 System Design
 
+## F14c2 execution increment — acknowledged unstarted-work cancellation
+
+The deletion confirmation now reads an authorized snapshot of queued impact and requires a separate acknowledgement bound to project guardRevision. Only never-started, unowned/unleased, zero-submission queued jobs/runs without provider-attempt evidence are cancellable. Exact job/run writes and the shared project guard serialize against worker claim; cancellation, conservative unused speech-hold settlement, tombstone, member fence, activity and permanent command receipt commit together. Rollback restores all of them. No external I/O, migration, renderer termination assumption or operator-gate change is introduced. Running/uncertain work, storage and publishing remain blocked. Physical cleanup and active-executor cancellation remain subsequent increments.
+
 ## F14c1 execution increment — idle project access removal
 
 Project deletion currently tombstones only idle/resolved projects. A same-origin authenticated revision-checked command uses permanent minimal receipts, project and membership write fences, one activity event and atomic rollback. Unresolved work (including expired rendering leases and local renders awaiting storage) refuses deletion. No executor slot is released, provider request sent, asset pin removed or R2/local object deleted. Files/content remain retained for a later reference-aware cleanup increment. The UI explicitly confirms team-wide loss of access and lack of an app restore action, serializes competing edits/actions, preserves uncertain commands and renders a content-free receipt after a lost acknowledgement/reload. Migration 020 and API-09 document the concrete subset; active-work cancellation and physical cleanup remain unimplemented.

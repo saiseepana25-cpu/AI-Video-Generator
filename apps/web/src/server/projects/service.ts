@@ -7,6 +7,8 @@ import {readBrandSelection} from '../brand/selection';
 import type {Env} from '../providers/contracts';
 import type {Job,PlanVersion} from '../planning/contracts';
 import type {DeleteInput,DeletionReceipt} from './deletion';
+import {deleteQuery,parseDeleteInput} from './deletion';
+import {inspectDeletionWork,cancelUnstartedDeletionWork} from './deletion-work';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
 import {ProjectError, requireProjectId, type ProjectContext, type ProjectDetail, type ProjectInput, type ProjectPage, type ProjectSummary} from './contracts';
 import {escapeLiteralSearch, graphemes, parseProjectInput, parseProjectPatch, parseDuplicateInput, defaultDuplicateTitle, requireIdempotencyKey, searchTitle, type ListOptions} from './validation';
@@ -76,9 +78,19 @@ export class ProjectService {
     return row.deletionReceipt as DeletionReceipt;
   }
 
+  async deletionImpact(id:string){
+    await this.authorize();requireProjectId(id);
+    return databaseTransaction(this.client,this.databaseName,async(db,session)=>{
+      await this.authorize(db,session);const source=await db.collection<ProjectRecord>('projects').findOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null},{session});if(!source)throw notFound();
+      return (await inspectDeletionWork(db,session,source)).impact;
+    });
+  }
+
   async delete(id:string,input:DeleteInput,key:string):Promise<{receipt:DeletionReceipt;replayed:boolean}>{
     await this.authorize();requireProjectId(id);requireIdempotencyKey(key);
-    if(!input||Object.keys(input).join(',')!=='expectedProjectRevision'||!Number.isSafeInteger(input.expectedProjectRevision)||input.expectedProjectRevision<1)throw new ProjectError('INVALID_QUERY',400,'Use a positive safe project revision.');
+    if(!input||Object.keys(input).some(k=>!['expectedProjectRevision','acknowledgeActiveWork','expectedWorkRevision'].includes(k))||typeof input.expectedProjectRevision!=='number'||!Number.isSafeInteger(input.expectedProjectRevision)||input.expectedProjectRevision<1||input.expectedWorkRevision!==undefined&&typeof input.expectedWorkRevision!=='number'||input.acknowledgeActiveWork!==undefined&&input.acknowledgeActiveWork!==true)throw new ProjectError('INVALID_QUERY',400,'Use the documented deletion fields.');
+    if((input.expectedWorkRevision!==undefined)!==(input.acknowledgeActiveWork===true))throw new ProjectError('INVALID_QUERY',400,'Queued-work acknowledgement requires its reviewed work revision.');
+    input=parseDeleteInput(deleteQuery(input));
     const identity={workspaceId:this.context.workspaceId,userId:this.context.userId,projectId:id,keyHash:hash(key)},requestHash=hash(JSON.stringify(input));
     const now=new Date(),receiptId=randomUUID(),eventId=randomUUID(),actor={kind:'user' as const,userId:this.context.userId};
     const receipt:DeletionReceipt={projectId:id,accessRemoved:true,cleanupState:'retained',cleanupJobId:null,externalPublicationState:'none_pending',message:'Project removed from team access. Files and records are retained; physical cleanup is not implemented yet.'};
@@ -90,29 +102,19 @@ export class ProjectService {
     };
     try{return await databaseTransaction(this.client,this.databaseName,async(db,session)=>{
       await this.authorize(db,session);const prior=await replay(db,session);if(prior)return prior;
-      const scope={workspaceId:this.context.workspaceId,projectId:id};
       const source=await db.collection<ProjectRecord>('projects').findOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null},{session});if(!source)throw notFound();
       if(counter(source.revision)!==input.expectedProjectRevision)throw new ProjectError('STALE_REVISION',409,'The project has newer saved changes. Reload and review before deleting.');
-      // No timer/lease expiry proves an executor stopped. This increment refuses
-      // unresolved work instead of cancelling it or releasing any physical slot.
-      const planning=await db.collection<Row>('jobs').findOne({...scope,$or:[{state:{$nin:['ready','failed','cancelled','superseded']}},{submission:{$in:['submitted','uncertain']}}]},{session,projection:{_id:1}});
-      const generation=await db.collection<Row>('generation_runs').findOne({...scope,state:{$nin:['cancelled','failed','rendered_local']}},{session,projection:{_id:1}});
-      const storage=await db.collection<Row>('generation_storage_bundles').findOne({...scope,state:{$ne:'stored'}},{session,projection:{_id:1}});
-      // Also refuse completed local renders awaiting discovery by storage.
-      const unstored=await db.collection<Row>('generation_runs').aggregate([
-        {$match:{...scope,state:'rendered_local'}},{$lookup:{from:'generation_storage_bundles',localField:'_id',foreignField:'runId',as:'bundles'}},
-        {$match:{bundles:{$not:{$elemMatch:{workspaceId:this.context.workspaceId,projectId:id,state:'stored'}}}}},{$limit:1},{$project:{_id:1}},
-      ],{session}).next();
-      if(source.activePlanningJobId||source.latestRunId||planning||generation||storage||unstored)throw new ProjectError('PROJECT_WORK_UNRESOLVED',409,'Finish or resolve planning, generation and storage work before deleting. Expired leases do not prove work has stopped.');
-      // Publication is not implemented. Fail closed if future/imported records
-      // exist until its cancellation/reconciliation contract is integrated.
-      if(await db.collection('publishing_intents').findOne(scope,{session,projection:{_id:1}}))throw new ProjectError('PROJECT_WORK_UNRESOLVED',409,'Publishing work must be resolved before this project can be deleted.');
+      const work=await inspectDeletionWork(db,session,source);
+      if(!work.impact.canDelete)throw new ProjectError('PROJECT_WORK_UNRESOLVED',409,work.impact.blockReason!);
+      if(input.acknowledgeActiveWork&&input.expectedWorkRevision!==work.impact.workRevision)throw new ProjectError('STALE_WORK',409,'Work changed. Reload and review its current impact before deleting.');
+      if((work.planning.length||work.generation.length)&&!input.acknowledgeActiveWork)throw new ProjectError('ACTIVE_WORK_ACK_REQUIRED',409,'Review and acknowledge the queued work before deleting.');
       if(counter(source.revision)>=Number.MAX_SAFE_INTEGER||counter(source.guardRevision)>=Number.MAX_SAFE_INTEGER)throw new ProjectError('DELETE_UNAVAILABLE',409,'The project has reached its revision limit.');
       const member=await db.collection<Row>('memberships').findOne({workspaceId:this.context.workspaceId,userId:this.context.userId,status:'active'},{session});
       if(!member)throw new ProjectError('TEAM_ACCESS_DENIED',403,'This account does not have team access.');
       if(member.generationGuardRevision&&counter(member.generationGuardRevision)>=Number.MAX_SAFE_INTEGER)throw new ProjectError('DELETE_UNAVAILABLE',409,'The membership guard has reached its limit.');
       if(!(await db.collection<Row>('memberships').updateOne({_id:member._id,status:'active'},{$inc:{generationGuardRevision:Long.ONE}},{session})).matchedCount)throw new ProjectError('TEAM_ACCESS_DENIED',403,'This account does not have team access.');
-      if(!(await db.collection<Row>('projects').updateOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null,revision:source.revision,guardRevision:source.guardRevision},{$set:{deletedAt:now,deletedBy:actor,deletionReceipt:receipt,updatedAt:now,updatedBy:actor},$inc:{revision:Long.ONE,guardRevision:Long.ONE}},{session})).matchedCount)throw new ProjectError('STALE_REVISION',409,'Reload and review the saved project before deleting.');
+      await cancelUnstartedDeletionWork(db,session,work,now);
+      if(!(await db.collection<Row>('projects').updateOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:null,revision:source.revision,guardRevision:source.guardRevision},{$set:{deletedAt:now,deletedBy:actor,deletionReceipt:receipt,updatedAt:now,updatedBy:actor,activePlanningJobId:null,latestRunId:null},$inc:{revision:Long.ONE,guardRevision:Long.ONE}},{session})).matchedCount)throw new ProjectError('STALE_REVISION',409,'Reload and review the saved project before deleting.');
       const workspace=await db.collection<Row>('workspaces').findOneAndUpdate({_id:this.context.workspaceId},{$inc:{nextActivitySequence:Long.ONE}},{session,returnDocument:'after'});if(!workspace)throw new ProjectError('CONNECTION_UNAVAILABLE',503,'The workspace is unavailable.',[],true);
       await db.collection<Row>('activity_events').insertOne({_id:eventId,schemaVersion:1,workspaceId:this.context.workspaceId,projectId:id,sequence:workspace.nextActivitySequence,dedupeKey:`project_deleted:${id}`,type:'project_deleted',actor,resourceRefs:{projectId:id},message:'A project was removed from team access.',actionNeeded:false,safeActionRoute:'/projects',createdAt:now},{session});
       await db.collection<Row>('project_delete_commands').insertOne({_id:receiptId,...identity,requestHash,snapshot:receipt,createdAt:now},{session});
