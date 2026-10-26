@@ -1,5 +1,21 @@
 # VideoCraft
 
+## Retiring obsolete speech-reuse references (F14c5b)
+
+Apply/audit migration **024** and restart app/workers. After deleted-project ready-media and local-render cleanup, an operator can run:
+
+```text
+npm.cmd run web:cleanup -- release-reuse <deleted-project-id>
+npm.cmd run web:cleanup -- speech <deleted-project-id>
+npm.cmd run web:cleanup -- status <deleted-project-id>
+```
+
+`release-reuse` commits up to 100 reference-release receipts per call; it does not delete records, files or remote objects. Each consuming run must be an ownerless/unleased completed render in the same deleted workspace/project, with matching artifact, approval, verified local cleanup and settled original speech provenance. Source and target canonical plans must agree with the recorded speech identity. Unresolved work, active/live/missing/foreign/unknown targets, publication payloads, generic owners and source drift refuse release. Cross-project reuse remains unsupported. Failed/unrendered consumers remain retained for a later recovery policy.
+
+Original generation_speech_reuses rows stay unchanged. A permanent speech_reuse_releases receipt fingerprints **every field** of that immutable row and binds workspace/project/source attempt/source run/target run. Only exact matching receipts retire pins. Missing, mismatched or changed reuse evidence continues to block speech removal, even when another reference has been released. More than 200 references on one attempt conservatively retains that file for operator review. Receipt writes and the project guard commit together; replay returns the original release without a second guard change. Release and audio cleanup share the project guard; new reuse must still refuse deleted projects and speech-cleanup checkpoints.
+
+`speech` can now remove verified WAVs whose historical pins all have exact release receipts. It retains the existing source/root/checksum and transaction checks. `status` adds `reuseRelease:{reuseRecords,releaseReceipts,retainedContent:true}` and reports still-effective pins under speechCleanup.pinnedAttempts; receipt counts alone do not certify eligibility. Source/approval/history/attempt/reuse records remain retained as audit/recovery evidence. This supersedes earlier blanket retention of references from deleted completed consumers; source-record purge, scratch/unpromoted/orphan lifecycle and active-executor cancellation remain pending. No public API, automatic cleanup, provider call or paid fallback is added. Existing user audio is not deleted during acceptance tests.
+
 ## Unreferenced settled speech cleanup (F14c5a)
 
 Apply/audit migration **023** and restart the app/workers. After owned R2 cleanup and verified local render cleanup, an operator can run:

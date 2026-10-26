@@ -8,11 +8,12 @@ import type {GenerationRun,SpeechAttempt,LocalArtifact,Approval} from '../genera
 import type {LocalTask} from './local-contracts';
 import type {SpeechCleanupTask,SpeechFileCleaner,SpeechSource} from './speech-contracts';
 import {CleanupFault} from './contracts';
+import {hasRetainedSpeechPin} from './reuse-pins';
 const fail=()=>new CleanupFault('SPEECH_CLEANUP_UNAVAILABLE');
 const advance=(n:Long)=>{if(!Long.isLong(n)||n.isNegative()||n.greaterThanOrEqual(Long.fromNumber(Number.MAX_SAFE_INTEGER)))throw fail();return n.add(Long.ONE);};
 export async function speechCleanupStatus(db:Db,workspaceId:string,projectId:string){
-  const rows=await db.collection<SpeechAttempt>('generation_speech_attempts').aggregate<{settledAttempts:number;pinnedAttempts:number}>([{$match:{workspaceId,state:'settled'}},{$lookup:{from:'generation_runs',localField:'runId',foreignField:'_id',as:'run'}},{$match:{'run.0.workspaceId':workspaceId,'run.0.projectId':projectId}},{$lookup:{from:'generation_speech_reuses',localField:'_id',foreignField:'sourceAttemptId',as:'refs'}},{$group:{_id:null,settledAttempts:{$sum:1},pinnedAttempts:{$sum:{$cond:[{$gt:[{$size:'$refs'},0]},1,0]}}}}]).toArray();
-  const scope={workspaceId,projectId};return {settledAttempts:rows[0]?.settledAttempts??0,pinnedAttempts:rows[0]?.pinnedAttempts??0,removedAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'removed'}),retryAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'retry'}),pendingAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'pending'}),retainedContent:true};
+  const rows=await db.collection<SpeechAttempt>('generation_speech_attempts').aggregate<{_id:string}>([{$match:{workspaceId,state:'settled'}},{$lookup:{from:'generation_runs',localField:'runId',foreignField:'_id',as:'run'}},{$match:{'run.0.workspaceId':workspaceId,'run.0.projectId':projectId}},{$project:{_id:1}}]).toArray();let pinnedAttempts=0;for(const row of rows)if(await hasRetainedSpeechPin(db,row._id))pinnedAttempts++;
+  const scope={workspaceId,projectId};return {settledAttempts:rows.length,pinnedAttempts,removedAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'removed'}),retryAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'retry'}),pendingAttempts:await db.collection('speech_cleanup_tasks').countDocuments({...scope,state:'pending'}),retainedContent:true};
 }
 export class SpeechCleanupService{
   constructor(private client:MongoClient,private name:string,private files:SpeechFileCleaner){}
@@ -25,10 +26,10 @@ export class SpeechCleanupService{
     const artifact=await db.collection<LocalArtifact>('generation_local_artifacts').findOne({_id:run.artifactId,runId:run._id,workspaceId:run.workspaceId,approvalId:run.approvalId,inputHash:run.inputHash,rendererBuildHash:run.rendererBuildHash},{session});
     const approval=await db.collection<Approval>('approvals').findOne({_id:run.approvalId,workspaceId:run.workspaceId,projectId:run.projectId,inputHash:run.inputHash},{session});
     if(!local||!artifact||!approval||local.source.runId!==run._id||local.source.artifactId!==artifact._id||local.source.manifestHash!==artifact.manifestHash||local.source.inputHash!==run.inputHash||local.source.rendererBuildHash!==run.rendererBuildHash)throw fail();
-    // Retain every surviving reuse pin, even when its target is also deleted.
+    // Only an exact permanent release receipt can retire a historical pin.
     // Cross-project reuse is unsupported; future pin writers must join the same
     // project guard and refuse any speech-cleanup checkpoint before reading.
-    if(await db.collection('generation_speech_reuses').findOne({sourceAttemptId:id},{session,projection:{_id:1}})||await db.collection('asset_refs').findOne({assetId:id},{session,projection:{_id:1}})||await db.collection('publishing_payloads').findOne({},{session,projection:{_id:1}}))throw fail();
+    if(await hasRetainedSpeechPin(db,id,session)||await db.collection('asset_refs').findOne({assetId:id},{session,projection:{_id:1}})||await db.collection('publishing_payloads').findOne({},{session,projection:{_id:1}}))throw fail();
     const source:SpeechSource={runId:run._id,attemptId:id,audioHash:attempt.audioHash,byteLength:attempt.byteLength,sampleRate:24000,inputHash:attempt.inputHash,providerConfigHash:attempt.providerConfigHash,textHash:attempt.textHash,segmentId:attempt.segmentId};return {source,project};
   }
   private async fence(db:Db,session:ClientSession,project:ProjectRecord){advance(project.guardRevision);if(!(await db.collection<ProjectRecord>('projects').updateOne({_id:project._id,workspaceId:project.workspaceId,deletedAt:project.deletedAt,guardRevision:project.guardRevision},{$inc:{guardRevision:Long.ONE}},{session})).matchedCount)throw fail();}
@@ -46,7 +47,7 @@ export class SpeechCleanupService{
   async next(projectId:string){requireProjectId(projectId);const [candidate]=await this.db.collection<SpeechAttempt>('generation_speech_attempts').aggregate<SpeechAttempt>([
     {$match:{state:'settled'}},{$lookup:{from:'generation_runs',localField:'runId',foreignField:'_id',as:'run'}},{$match:{'run.0.projectId':projectId,'run.0.state':'rendered_local'}},
     {$lookup:{from:'local_render_cleanup_tasks',localField:'runId',foreignField:'runId',as:'local'}},{$match:{'local.0.state':'cleaned'}},
-    {$lookup:{from:'generation_speech_reuses',localField:'_id',foreignField:'sourceAttemptId',as:'refs'}},{$match:{'refs.0':{$exists:false}}},
+    {$lookup:{from:'generation_speech_reuses',localField:'_id',foreignField:'sourceAttemptId',as:'refs'}},{$lookup:{from:'speech_reuse_releases',localField:'refs._id',foreignField:'_id',as:'releases'}},{$match:{$expr:{$eq:[{$size:'$refs'},{$size:'$releases'}]}}},
     {$lookup:{from:'speech_cleanup_tasks',localField:'_id',foreignField:'_id',as:'task'}},{$match:{'task.0.state':{$ne:'removed'}}},{$sort:{createdAt:1,_id:1}},{$limit:1}
   ]).toArray();if(!candidate)return false;await this.clean(candidate._id);return true;}
 }

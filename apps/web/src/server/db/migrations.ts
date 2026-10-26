@@ -23,6 +23,7 @@ import {deletionCollections} from './deletion-schemas';
 import {cleanupCollections} from './cleanup-schemas';
 import {localCleanupCollections} from './local-cleanup-schemas';
 import {speechCleanupCollections} from './speech-cleanup-schemas';
+import {reuseReleaseCollections} from './reuse-release-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -64,6 +65,7 @@ const migrations = [
   {definition:{id:'021_ready_media_cleanup',description:'Reference-fenced ready-media cleanup checkpoints and released ownership lifecycle',contracts:cleanupCollections},checksum:createHash('sha256').update(JSON.stringify(cleanupCollections)).digest('hex')},
   {definition:{id:'022_local_render_cleanup',description:'Root-bound verified local render-file removal checkpoints',contracts:localCleanupCollections},checksum:createHash('sha256').update(JSON.stringify(localCleanupCollections)).digest('hex')},
   {definition:{id:'023_speech_file_cleanup',description:'Reference-aware settled speech file cleanup checkpoints',contracts:speechCleanupCollections},checksum:createHash('sha256').update(JSON.stringify(speechCleanupCollections)).digest('hex')},
+  {definition:{id:'024_speech_reuse_release',description:'Permanent exact reuse-reference release receipts for cleaned deleted targets',contracts:reuseReleaseCollections},checksum:createHash('sha256').update(JSON.stringify(reuseReleaseCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 
