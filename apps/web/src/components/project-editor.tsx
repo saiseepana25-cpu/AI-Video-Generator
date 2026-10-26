@@ -12,6 +12,7 @@ import {PlanningPanel} from './planning-panel';
 import {ProjectRename} from './project-rename';
 import {ProjectDuplicate} from './project-duplicate';
 import {ProjectDelete} from './project-delete';
+import {canCorrectSaveFailure} from '@/lib/save-outcome';
 
 type Mode = 'ready' | 'saving' | 'error' | 'session' | 'conflict' | 'review';
 type State = {base: ProjectDetail; draft: Draft; pending: PendingEdit | null; mode: Mode; message: string; latest: ProjectDetail | null};
@@ -69,7 +70,7 @@ export function ProjectEditor({project, workspaceId, userId}: {project: ProjectD
         await loadLatest();
       } else if (response.status === 401) {
         update({...latest, mode: 'session', message: 'Your session ended. Sign in in a new tab, then retry the same save.'});
-      } else if (response.status >= 500) {
+      } else if (!canCorrectSaveFailure(response.status,value.error?.code)) {
         update({...latest, mode: 'error', message: 'The save could not be confirmed. Retry will check the same request before saving later edits.'});
       } else {
         update({...latest, pending: null, mode: 'error', message: value.error?.fieldErrors?.[0]?.message ?? value.error?.message ?? 'Your changes could not be saved.'});
