@@ -8,6 +8,7 @@ import type {Env} from '../providers/contracts';
 import type {Job,PlanVersion} from '../planning/contracts';
 import type {DeleteInput,DeletionReceipt,DeletionStatus} from './deletion';
 import {mediaCleanupStatus} from '../cleanup/service';
+import {localRenderStatus} from '../cleanup/local-service';
 import {deleteQuery,parseDeleteInput} from './deletion';
 import {inspectDeletionWork,cancelUnstartedDeletionWork} from './deletion-work';
 import {decodeProjectCursor, encodeProjectCursor} from './cursor';
@@ -76,7 +77,7 @@ export class ProjectService {
     const row=await this.db.collection<Row>('projects').findOne({_id:id,workspaceId:this.context.workspaceId,deletedAt:{$ne:null}},{projection:{deletionReceipt:1}});
     if(!row?.deletionReceipt)throw notFound();
     // Deliberately excludes title, source content, storage addresses and actor identity.
-    return {...row.deletionReceipt as DeletionReceipt,mediaCleanup:await mediaCleanupStatus(this.db,this.context.workspaceId,id)};
+    return {...row.deletionReceipt as DeletionReceipt,mediaCleanup:await mediaCleanupStatus(this.db,this.context.workspaceId,id),localRenderCleanup:await localRenderStatus(this.db,this.context.workspaceId,id)};
   }
 
   async deletionImpact(id:string){

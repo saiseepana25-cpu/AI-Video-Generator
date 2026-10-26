@@ -26,9 +26,12 @@ import {providerEnv, providerFixture} from './fixtures/providers';
 import {pins, renderFixture} from './fixtures/rendering';
 import {StorageService} from '../src/server/storage/service';
 import {MediaCleanupService} from '../src/server/cleanup/service';
+import {LocalCleanupService} from '../src/server/cleanup/local-service';
+import {localCleanupCollections} from '../src/server/db/local-cleanup-schemas';
+import type {LocalSource,LocalFile,LocalTask} from '../src/server/cleanup/local-contracts';
 import {cleanupCollections} from '../src/server/db/cleanup-schemas';
 import {ProjectService} from '../src/server/projects/service';
-import {storageKinds, StorageFault, type StorageBundle, type StorageKind, type StorageObject} from '../src/server/storage/contracts';
+import {storageFiles,storageKinds, StorageFault, type StorageBundle, type StorageKind, type StorageObject} from '../src/server/storage/contracts';
 import {sha256, verifyObject} from '../src/server/storage/r2';
 import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
 import type {ReadyVideo} from '../src/server/videos/contracts';
@@ -57,7 +60,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -330,6 +333,28 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const removed:string[]=[],adapter={configHash:setup.store.configHash,bucket:setup.store.bucket,hook:undefined as undefined|(()=>Promise<void>),async remove(object:StorageObject){removed.push(object.key);setup.store.objects.delete(object.key);await this.hook?.();}};
     const cleanup=new MediaCleanupService(client,name,adapter),assets=await db.collection<Row>('video_assets').find({projectId}).sort({_id:1}).toArray();return {...setup,projects,adapter,removed,cleanup,assets};
   }
+  async function localSetup(removed=true){
+    const setup=await cleanupSetup();if(removed)while(await setup.cleanup.next(projectId)){}
+    const adapter={rootHash:'c'.repeat(64),inspections:0,removals:0,hook:undefined as undefined|(()=>Promise<void>),async inspect(source:LocalSource){this.inspections++;return source.objects.map(o=>({name:storageFiles[o.kind].name,sha256:o.sha256,size:o.size}));},async remove(_source:LocalSource,_files:LocalFile[]){this.removals++;await this.hook?.();}};
+    return {...setup,files:adapter,local:new LocalCleanupService(client,name,adapter)};
+  }
+  test('local cleanup requires confirmed remote cleanup and retains generation/speech source metadata',async()=>{
+    const {local,files,current,projects,cleanup}=await localSetup(false);await assert.rejects(local.clean(current._id),/LOCAL_CLEANUP_OWNERSHIP_UNAVAILABLE/);assert.equal(files.inspections,0);while(await cleanup.next(projectId)){}
+    assert.equal(await local.next(projectId),true);assert.equal(await local.next(projectId),false);assert.equal(files.inspections,1);assert.equal(files.removals,1);const status=await projects.deletionStatus(projectId);assert.equal(status.localRenderCleanup.state,'known_files_removed');assert.equal(await db.collection('generation_local_artifacts').countDocuments(),1);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),3);assert.equal(engine.renderCalls,1);await checkDatabase(db);
+  });
+  test('local cleanup resumes immutable inventory after partial failure and refuses another root',async()=>{
+    const {local,files,current,projects}=await localSetup();files.hook=async()=>{throw new Error('private filesystem path');};await assert.rejects(local.clean(current._id),/LOCAL_REMOVAL_FAILED/);assert.equal((await projects.deletionStatus(projectId)).localRenderCleanup.state,'retry_required');
+    await assert.rejects(new LocalCleanupService(client,name,{...files,rootHash:'d'.repeat(64)}).clean(current._id));files.hook=undefined;assert.equal(await new LocalCleanupService(client,name,files).clean(current._id),true);assert.equal(files.inspections,1);assert.equal(files.removals,2);assert.equal((await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({}))!.attempts.toString(),'2');
+  });
+  test('local cleanup retries a lost final commit without re-inspection or rendering',async()=>{
+    const {local,files,current}=await localSetup();files.hook=async()=>{await db.command({collMod:'local_render_cleanup_tasks',validator:{$and:[localCleanupCollections[0].validator,{state:{$ne:'cleaned'}}]}});};try{await assert.rejects(local.clean(current._id));}finally{await db.command({collMod:'local_render_cleanup_tasks',validator:localCleanupCollections[0].validator});}files.hook=undefined;assert.equal((await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({}))!.state,'pending');assert.equal(await local.clean(current._id),true);assert.equal(files.inspections,1);assert.equal(engine.renderCalls,1);
+  });
+  test('local cleanup refuses a surviving source pin and unsettled executor metadata',async()=>{
+    const {local,files,current,assets}=await localSetup();await db.collection('asset_refs').insertOne({assetId:assets[0]._id,owner:'unknown'});await assert.rejects(local.clean(current._id));await db.collection('asset_refs').deleteMany({});await db.collection<GenerationRun>('generation_runs').updateOne({_id:current._id},{$set:{owner:'still-running'}},{bypassDocumentValidation:true});await assert.rejects(local.clean(current._id));assert.equal(files.inspections,0);assert.equal(files.removals,0);assert.equal(await db.collection('local_render_cleanup_tasks').countDocuments(),0);
+  });
+  test('concurrent local cleanup attempts fence finalization at the same immutable inventory',async()=>{
+    const {local,files,current}=await localSetup();await Promise.all([local.clean(current._id),new LocalCleanupService(client,name,files).clean(current._id)]);assert.equal(await db.collection('local_render_cleanup_tasks').countDocuments({state:'cleaned'}),1);assert.ok(files.removals>=1&&files.removals<=2);assert.equal(await local.clean(current._id),false);await checkDatabase(db);
+  });
   test('cleanup removes five owned ready objects while preserving source metadata and shared namespaces',async()=>{
     const {cleanup,store,removed,projects}=await cleanupSetup();store.objects.set('shared-brand/logo.png',Buffer.from('retained'));
     while(await cleanup.next(projectId)){}assert.equal(removed.length,5);assert.deepEqual([...store.objects.keys()],['shared-brand/logo.png']);assert.equal(await db.collection('video_assets').countDocuments({projectId,lifecycleState:'deleted',refCount:0}),5);assert.equal(await db.collection('media_cleanup_tasks').countDocuments({projectId,state:'deleted'}),5);

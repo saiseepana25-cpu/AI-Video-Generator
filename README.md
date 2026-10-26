@@ -1,5 +1,20 @@
 # VideoCraft
 
+## Verified local render cleanup (F14c4)
+
+Apply/audit migration **022** before restarting the dashboard and workers. After ready-media cleanup has confirmed removal of all five owned R2 objects, the operator can run:
+
+```text
+npm.cmd run web:cleanup -- local <deleted-project-id>
+npm.cmd run web:cleanup -- status <deleted-project-id>
+```
+
+`local` physically removes verified completed render files, up to 100 bundles per invocation. It requires a tombstoned project, resolved work, terminal render ownership and matching completed artifact/stored bundle/ready-video/deleted-asset receipts. It does not contact R2 or providers. Run from the repository root using the script; the web script resolves the canonical repository root. Moving the repository after a checkpoint changes its root fingerprint and requires review rather than silently resuming elsewhere.
+
+The five core files must match their recorded SHA256/size; the manifest must match the completed artifact. An optional narration copy must match the manifest audio hash. Existing scene previews are bounded and checkpointed. Only the fixed filenames inside `output/dashboard-renders/<run UUID>/<artifact UUID>/` are eligible. Unknown files, empty directories, reusable `output/dashboard-speech` audio, `.cache/selected-renderer` scratch, source/history/approval records, branding and unpromoted/orphan output remain retained. This supersedes the earlier F14c3 statement that every local render file is retained; full erasure remains pending.
+
+Before unlinking, an immutable inventory is checkpointed with root fingerprint and a project guard write. Partial failures or lost final acknowledgements retry that inventory; already absent files are accepted only on the checkpoint path. Replaced bytes, hard links, symlink/junction ancestors or changed provenance refuse cleanup. No recursive or prefix deletion occurs. This assumes a trusted operator filesystem and immutable completed outputs: arbitrary hostile concurrent filesystem mutation is outside the local MVP's boundary. Stop other local file-management tools before cleanup. `status` and the protected deletion page show local bundle counts separately from ready-media progress; neither exposes local paths or claims all data erased. Physical deletion is exercised only on disposable test fixtures, not existing user outputs.
+
 ## Ready-media cleanup for deleted projects (F14c3)
 
 Apply migration 021 with `npm.cmd run web:db:migrate`, then audit with `npm.cmd run web:db:check`. The dashboard does **not** start cleanup automatically. The operator-local commands are:
