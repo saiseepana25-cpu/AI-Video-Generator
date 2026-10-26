@@ -27,6 +27,9 @@ import {pins, renderFixture} from './fixtures/rendering';
 import {StorageService} from '../src/server/storage/service';
 import {MediaCleanupService} from '../src/server/cleanup/service';
 import {LocalCleanupService} from '../src/server/cleanup/local-service';
+import {SpeechCleanupService,speechCleanupStatus} from '../src/server/cleanup/speech-service';
+import {speechCleanupCollections} from '../src/server/db/speech-cleanup-schemas';
+import type {SpeechCleanupTask,SpeechSource} from '../src/server/cleanup/speech-contracts';
 import {localCleanupCollections} from '../src/server/db/local-cleanup-schemas';
 import type {LocalSource,LocalFile,LocalTask} from '../src/server/cleanup/local-contracts';
 import {cleanupCollections} from '../src/server/db/cleanup-schemas';
@@ -60,7 +63,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -135,6 +138,13 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal(await db.collection('generation_speech_attempts').countDocuments({runId:next._id}),0);
     assert.equal((await provider())!.allowance.observedRemaining,remaining);assert.equal((await provider())!.reservations.some(r=>r.id===next.reservationId),false);
     await assert.rejects(db.collection<Row>('generation_speech_reuses').insertOne({...refs[0],_id:randomUUID()}), (e:unknown)=>!!e&&typeof e==='object'&&'code'in e&&e.code===11000);
+  });
+  async function checkpointSpeech(attempt:SpeechAttempt){const now=new Date();await db.collection<SpeechCleanupTask>('speech_cleanup_tasks').insertOne({_id:attempt._id,workspaceId:testWorkspaceId,projectId,source:{runId:attempt.runId,attemptId:attempt._id,audioHash:attempt.audioHash!,byteLength:attempt.byteLength!,sampleRate:24000,inputHash:attempt.inputHash,providerConfigHash:attempt.providerConfigHash,textHash:attempt.textHash,segmentId:attempt.segmentId},rootHash:'c'.repeat(64),state:'pending',revision:Long.ONE,attempts:Long.ONE,error:null,createdAt:now,updatedAt:now,removedAt:null});}
+  test('speech reuse skips cleanup-checkpointed sources before reading their audio',async()=>{
+    await approve();await worker.tick();const first=(await run())!,attempt=(await db.collection<SpeechAttempt>('generation_speech_attempts').findOne({runId:first._id}))!;await checkpointSpeech(attempt);engine.reuseEnabled=true;const next=await approveRevision();await worker.tick();assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'rendered_local');assert.equal(engine.reuseReads,2);assert.equal(engine.speechCalls,4);assert.equal(await db.collection('generation_speech_reuses').countDocuments({sourceAttemptId:attempt._id}),0);
+  });
+  test('speech reuse refuses a cleanup checkpoint appearing during the audio read',async()=>{
+    await approve();await worker.tick();const first=(await run())!,attempts=await db.collection<SpeechAttempt>('generation_speech_attempts').find({runId:first._id}).toArray();engine.reuseEnabled=true;engine.duringRead=async()=>{for(const a of attempts)await checkpointSpeech(a);return audio();};const next=await approveRevision();await worker.tick();assert.equal((await db.collection<GenerationRun>('generation_runs').findOne({_id:next._id}))!.state,'failed');assert.equal(await db.collection('generation_speech_reuses').countDocuments({runId:next._id}),0);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);
   });
   test('verified speech reuse synthesizes only changed narration and never counts reused phrases as submissions',async()=>{
     await approve();await worker.tick();engine.reuseEnabled=true;const next=await approveRevision(true);await worker.tick();
@@ -338,6 +348,28 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const adapter={rootHash:'c'.repeat(64),inspections:0,removals:0,hook:undefined as undefined|(()=>Promise<void>),async inspect(source:LocalSource){this.inspections++;return source.objects.map(o=>({name:storageFiles[o.kind].name,sha256:o.sha256,size:o.size}));},async remove(_source:LocalSource,_files:LocalFile[]){this.removals++;await this.hook?.();}};
     return {...setup,files:adapter,local:new LocalCleanupService(client,name,adapter)};
   }
+  async function speechCleanupSetup(cleaned=true){
+    const setup=await localSetup();if(cleaned)await setup.local.next(projectId);
+    const files={rootHash:setup.files.rootHash,inspections:0,removals:[] as string[],hook:undefined as undefined|(()=>Promise<void>),async inspect(_source:SpeechSource){this.inspections++;},async remove(source:SpeechSource){this.removals.push(source.attemptId);await this.hook?.();}};
+    const attempts=await db.collection<SpeechAttempt>('generation_speech_attempts').find({runId:setup.current._id,state:'settled'}).sort({_id:1}).toArray();return {...setup,speechFiles:files,speechCleanup:new SpeechCleanupService(client,name,files),attempts};
+  }
+  test('speech cleanup follows local cleanup and preserves all source records',async()=>{
+    const {speechCleanup,speechFiles,attempts,local}=await speechCleanupSetup(false);await assert.rejects(speechCleanup.clean(attempts[0]._id));assert.equal(speechFiles.inspections,0);await local.next(projectId);while(await speechCleanup.next(projectId)){}assert.equal(speechFiles.removals.length,3);assert.equal((await speechCleanupStatus(db,testWorkspaceId,projectId)).removedAttempts,3);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),3);assert.equal(await db.collection('approvals').countDocuments(),1);assert.equal(await db.collection('generation_local_artifacts').countDocuments(),1);assert.equal(engine.renderCalls,1);await checkDatabase(db);
+  });
+  test('speech cleanup retains surviving reuse pins and unknown generic owners',async()=>{
+    const {speechCleanup,speechFiles,attempts,current}=await speechCleanupSetup();const attempt=attempts[0];
+    await db.collection<Row>('generation_speech_reuses').insertOne({_id:randomUUID(),workspaceId:testWorkspaceId,projectId,runId:randomUUID(),segmentId:attempt.segmentId,sourceRunId:current._id,sourceAttemptId:attempt._id,sourceApprovalId:current.approvalId,sourceInputHash:current.inputHash,inputHash:current.inputHash,identityHash:'a'.repeat(64),providerConfigHash:current.providerConfigHash,audioHash:attempt.audioHash,byteLength:attempt.byteLength,sampleRate:24000,owner:randomUUID(),leaseEpoch:Long.ONE,createdAt:new Date()});
+    await assert.rejects(speechCleanup.clean(attempt._id));while(await speechCleanup.next(projectId)){}assert.equal(speechFiles.removals.length,2);assert.ok(!speechFiles.removals.includes(attempt._id));assert.equal((await speechCleanupStatus(db,testWorkspaceId,projectId)).pinnedAttempts,1);await db.collection('generation_speech_reuses').deleteMany({});await db.collection('asset_refs').insertOne({assetId:attempt._id,owner:'unknown'});await assert.rejects(speechCleanup.clean(attempt._id));assert.equal(await db.collection<Row>('speech_cleanup_tasks').countDocuments({_id:attempt._id}),0);
+  });
+  test('speech cleanup resumes failed removal with pinned identity and refuses a changed root',async()=>{
+    const {speechCleanup,speechFiles,attempts}=await speechCleanupSetup();const id=attempts[0]._id;speechFiles.hook=async()=>{throw new Error('private filesystem path');};await assert.rejects(speechCleanup.clean(id),/SPEECH_REMOVAL_FAILED/);assert.equal((await speechCleanupStatus(db,testWorkspaceId,projectId)).retryAttempts,1);await assert.rejects(new SpeechCleanupService(client,name,{...speechFiles,rootHash:'f'.repeat(64)}).clean(id));speechFiles.hook=undefined;assert.equal(await speechCleanup.clean(id),true);assert.equal(speechFiles.inspections,1);assert.equal((await db.collection<SpeechCleanupTask>('speech_cleanup_tasks').findOne({_id:id}))!.attempts.toString(),'2');assert.equal(await speechCleanup.clean(id),false);
+  });
+  test('speech cleanup recovers an unacknowledged final commit using the same attempt',async()=>{
+    const {speechCleanup,speechFiles,attempts}=await speechCleanupSetup();const id=attempts[0]._id;speechFiles.hook=async()=>{await db.command({collMod:'speech_cleanup_tasks',validator:{$and:[speechCleanupCollections[0].validator,{state:{$ne:'removed'}}]}});};try{await assert.rejects(speechCleanup.clean(id));}finally{await db.command({collMod:'speech_cleanup_tasks',validator:speechCleanupCollections[0].validator});}assert.equal((await db.collection<SpeechCleanupTask>('speech_cleanup_tasks').findOne({_id:id}))!.state,'pending');speechFiles.hook=undefined;assert.equal(await speechCleanup.clean(id),true);assert.deepEqual(speechFiles.removals,[id,id]);assert.equal(speechFiles.inspections,1);assert.equal(engine.renderCalls,1);
+  });
+  test('concurrent speech cleanup fences finalizers and schema rejects contradictory receipts',async()=>{
+    const {speechCleanup,speechFiles,attempts}=await speechCleanupSetup();const id=attempts[0]._id;await Promise.all([speechCleanup.clean(id),new SpeechCleanupService(client,name,speechFiles).clean(id)]);assert.equal(await db.collection<Row>('speech_cleanup_tasks').countDocuments({_id:id,state:'removed'}),1);await assert.rejects(db.collection<SpeechCleanupTask>('speech_cleanup_tasks').updateOne({_id:id},{$set:{removedAt:null}}));await checkDatabase(db);
+  });
   test('local cleanup requires confirmed remote cleanup and retains generation/speech source metadata',async()=>{
     const {local,files,current,projects,cleanup}=await localSetup(false);await assert.rejects(local.clean(current._id),/LOCAL_CLEANUP_OWNERSHIP_UNAVAILABLE/);assert.equal(files.inspections,0);while(await cleanup.next(projectId)){}
     assert.equal(await local.next(projectId),true);assert.equal(await local.next(projectId),false);assert.equal(files.inspections,1);assert.equal(files.removals,1);const status=await projects.deletionStatus(projectId);assert.equal(status.localRenderCleanup.state,'known_files_removed');assert.equal(await db.collection('generation_local_artifacts').countDocuments(),1);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),3);assert.equal(engine.renderCalls,1);await checkDatabase(db);

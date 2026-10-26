@@ -1,5 +1,22 @@
 # VideoCraft
 
+## Unreferenced settled speech cleanup (F14c5a)
+
+Apply/audit migration **023** and restart the app/workers. After owned R2 cleanup and verified local render cleanup, an operator can run:
+
+```text
+npm.cmd run web:cleanup -- speech <deleted-project-id>
+npm.cmd run web:cleanup -- status <deleted-project-id>
+```
+
+`speech` physically removes at most 100 eligible settled attempt WAVs. It requires the same canonical repository root as the completed local-render checkpoint, a tombstoned project, resolved work, an ownerless/unleased completed render, matching approval/artifact/input/provider identity and **no surviving speech-reuse or generic asset reference**. Even references from other deleted projects retain audio; this step does not release pins. Unknown publication payloads refuse cleanup. Submitted/uncertain/refused attempts, failed/unpromoted runs, untracked files and source records remain retained. A zero processed count is not proof of erasure.
+
+Each file is exactly `output/dashboard-speech/<run UUID>/<attempt UUID>.wav`, bounded and verified against the settled attempt's original SHA256/byteLength. Initial missing or changed bytes refuse checkpointing. A permanent task captures identity/root before I/O; partial failure or lost final acknowledgement resumes the same file, accepting absence only on that checkpoint path. Changed provenance/root, hard links and symlink/junction traversal refuse removal. No recursive/prefix deletion, directory removal or source-record purge. This uses the trusted local filesystem boundary described below.
+
+`status` additionally reports `speechCleanup` settled/pinned/removed/pending/retry attempt counts without file locations or credentials. Pinned counts cover speech-reuse references, not every possible retained reason, and are not an eligibility calculation. New reuse checks for any cleanup checkpoint before reading audio and again when accepting a pin. The same project guard serializes cleanup and current same-project reuse acceptance; cross-project reuse remains unsupported. Future pin writers must honor that guard and refuse cleanup-checkpointed attempts. No inference, speech submission, paid fallback or automatic cleanup is introduced.
+
+This supersedes earlier statements that all speech files remain retained: **referenced speech and all source/history/approval/attempt/reuse metadata still remain retained**. Releasing reuse pins/source payloads, scratch/unpromoted/orphan cleanup and active-executor cancellation are separate future increments.
+
 ## Verified local render cleanup (F14c4)
 
 Apply/audit migration **022** before restarting the dashboard and workers. After ready-media cleanup has confirmed removal of all five owned R2 objects, the operator can run:

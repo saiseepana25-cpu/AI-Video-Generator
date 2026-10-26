@@ -21,11 +21,13 @@ export async function trySpeechReuse(client:MongoClient,name:string,env:Env,engi
     const attempt=await db.collection<SpeechAttempt>('generation_speech_attempts').findOne({runId:sourceRun._id,workspaceId:run.workspaceId,segmentId,state:'settled',inputHash:sourceRun.inputHash,providerConfigHash:run.providerConfigHash,textHash:digest(plan.narration.find(n=>n.segmentId===segmentId)!.text)});
     const artifact=sourceRun.artifactId&&await db.collection<LocalArtifact>('generation_local_artifacts').findOne({_id:sourceRun.artifactId,runId:sourceRun._id,workspaceId:run.workspaceId,approvalId:sourceRun.approvalId,inputHash:sourceRun.inputHash});
     if(!attempt?.audioHash||!attempt.byteLength||attempt.sampleRate!==24000||!artifact)continue;
+    if(await db.collection<Row>('speech_cleanup_tasks').findOne({_id:attempt._id},{projection:{_id:1}}))continue;
     const source:Source={run:sourceRun,attempt,approval:approval!,artifact,identityHash};
     let audio;try{audio=await engine.readSpeech({runId:sourceRun._id,attemptId:attempt._id,audioHash:attempt.audioHash,byteLength:attempt.byteLength,sampleRate:attempt.sampleRate},signal);}catch{signal.throwIfAborted();continue;}
     if(audio.sampleRate!==24000||audio.samples.length<2400||audio.samples.length>2160000||audio.samples.some(n=>!Number.isFinite(n)))continue;
     await databaseTransaction(client,name,async(tx,session)=>{
       await fence(tx,session);signal.throwIfAborted();
+      if(await tx.collection<Row>('speech_cleanup_tasks').findOne({_id:attempt._id},{session,projection:{_id:1}}))throw new GenerationFault('SPEECH_REUSE_SOURCE_CHANGED');
       const provider=await tx.collection<ProviderControl>('provider_controls').findOne({_id:'elevenlabs',state:'enabled',operatorDisabled:{$ne:true},configHash:run.providerConfigHash},{session});
       if(!provider||provider.reasonCode||provider.reservations.some(r=>r.state==='uncertain')||providerConfig('elevenlabs',env).configHash!==run.providerConfigHash)throw new GenerationFault('FREE_SPEECH_UNAVAILABLE');
       if(!await tx.collection<GenerationRun>('generation_runs').findOne({_id:source.run._id,workspaceId:run.workspaceId,projectId:run.projectId,state:'rendered_local',inputHash:source.run.inputHash,approvalId:source.approval._id,artifactId:source.artifact._id,providerConfigHash:run.providerConfigHash},{session})
