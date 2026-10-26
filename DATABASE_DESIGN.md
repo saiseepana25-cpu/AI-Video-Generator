@@ -485,6 +485,12 @@ Insert-only fields: `_id`, workspaceId, projectId:null|Id, sequence:L, dedupeKey
 
 Read position belongs to memberships. Deleted-project events expose only minimal outcome/recovery information to current members. Raw provider logs/references/tokens/signed URLs never belong in these messages. Detailed sanitized operational timing is in attempts/logs; no extra analytics platform is required.
 
+F15 implementation (26 October 2026): no schema/index migration. Existing activity workspace/project sequence indexes support bounded descending snapshot pages; HMAC cursors bind the initial high water, member and filters. A read-only snapshot checks active membership/workspace and resolves at most 50 live project labels before returning safe DTOs. Removed/missing project events remain minimal and carry no removed title, prompt, actor ID or project link. Stored routes are never returned directly. Types filtering is bounded by the deployed event catalog.
+
+Explicit read acknowledgement runs in a snapshot/majority transaction: verify the member is active, reject a requested sequence above workspace.nextActivitySequence, then `$max` only that member's activityReadThroughSequence while fencing the same membership record used by revocation. Transaction retries resolve concurrent acknowledgements monotonically. No event, preference/settings revision, project or job mutation and no HTTP command receipt is needed for this naturally idempotent operation. New events after the observed high water stay unread.
+
+Operations/recovery is read-only and uses existing worker/provider/budget records, queue counts and at most ten distinct recent live projects from 50 activity events. Per-project latest generation/planning and unique run-storage indexes resolve current-plan/brief issues. It is a recent-project summary, not an exhaustive historical failure search. No raw approval/brief, reservation balance, credentials, storage addresses, logs or executor identity leaves the server. Stale render leases remain occupied pending executor-stop evidence; viewing status never recovers or releases them. Publishing/scheduling are explicitly unimplemented. Runtime collection creation/index writes and metadata/provider refresh are forbidden on these reads.
+
 ### 6.6 `idempotency_records`
 
 Fields: `_id`, workspaceId, userId, routeScope (method + resource/action), keyHash:Hash, requestHash:Hash, committedHttpStatus, safeResultRef, optional bounded safe response snapshot, createdAt, expiresAt:D, schemaVersion. No persistent pending status is considered a committed result.

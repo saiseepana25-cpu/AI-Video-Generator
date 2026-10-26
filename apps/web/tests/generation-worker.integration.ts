@@ -15,6 +15,7 @@ import {databaseClientOptions} from '../src/server/db/connection';
 import {checkDatabase, migrateDatabase} from '../src/server/db/migrations';
 import {GenerationService} from '../src/server/generation/service';
 import {GenerationWorker} from '../src/server/generation/worker';
+import {OperationsService} from '../src/server/activity/operations';
 import {GenerationFault, type GenerationEngine, type MeasuredSpeech} from '../src/server/generation/engine';
 import {requiredCapabilities, type GenerationRun, type SpeechAttempt, type GenerationWorker as WorkerRow} from '../src/server/generation/contracts';
 import type {PlanVersion} from '../src/server/planning/contracts';
@@ -258,6 +259,9 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.deepEqual(failed.error, {code: 'NARRATION_DURATION_EXCEEDED', retryable: false, message: 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.'});
     const status = await service.job(failed.jobId); assert.ok(status);
     assert.deepEqual(status.error, failed.error);
+    const recovery=await new OperationsService(client,name,context,providerEnv).read();
+    assert.equal(recovery.recovery.items.length,1);assert.equal(recovery.recovery.items[0].kind,'generation');assert.match(recovery.recovery.items[0].message,/Shorten it/);
+    assert.equal(recovery.recovery.items[0].safeActionRoute,`/projects/${projectId}`);
     assert.equal((await provider())!.state, 'enabled'); assert.equal((await provider())!.reservations[0].state, 'settled');
     assert.equal(await db.collection('generation_speech_attempts').countDocuments({state: 'settled'}), 3);
     assert.equal(await db.collection('generation_local_artifacts').countDocuments(), 0);
@@ -303,6 +307,9 @@ describe('generation worker ownership, submission fencing and recovery', {concur
         await db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local'}, {$set: {expiresAt: new Date(0)}});
         const beforeRun = await run(), beforeProvider = await provider();
         const beforeProject = await db.collection<Row>('projects').findOne({_id: projectId});
+        const operations=await new OperationsService(client,name,context,providerEnv).read();
+        assert.equal(operations.worker.activeRenders,1);
+        assert.match(operations.recovery.items.find(item=>item.projectId===projectId)!.message,/confirm that it has stopped/);
         const replacementEngine = new FakeEngine(), replacement = new GenerationWorker(client, name, providerEnv, replacementEngine);
         assert.equal(await replacement.heartbeat(), true);
         assert.equal(await replacement.recoverExpired(), 0);

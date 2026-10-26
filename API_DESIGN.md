@@ -1008,9 +1008,13 @@ Query required `from`, `to` UTC timestamps and valid IANA `timezone`; optional `
 
 Query `limit,cursor,projectId?,types?`. **200 data:** `{items:ActivityEvent[],page,readThroughSequence,latestSequence}`. Only bounded current-member-visible content; after deletion retain minimal outcome notices without exposing removed prompts/URLs. System/actor events have stable IDs/dedupe keys and action links. No raw diagnostic logs or expensive global unread-count requirement.
 
+F15 local implementation (26 October 2026): limit defaults to 20, range 1–50. Types is a comma-separated unique subset of `project_created,project_updated,project_deleted,planning_changed,generation_changed,workspace_settings_changed,workspace_brand_changed`. Unknown/repeated/empty filters return 400; inaccessible/deleted project filters return 404. HMAC cursors bind member/workspace, canonical filters, page size, descending sequence boundary, one-hour expiry and the initial snapshot high-water sequence. New events do not enter an older page chain. `latestSequence` is that chain's high water; Refresh starts a fresh chain. `page:{limit,hasMore,nextCursor}`; `timezone` is the team timezone. Items contain `id,sequence,type,projectId,projectTitle,message,actor,createdAt,safeActionRoute,actionNeeded`. Actor is only `Team member|Studio`; no raw user IDs or dedupe keys are serialized. Project labels/links are resolved against current live same-workspace projects; removed/missing projects expose only a minimal notice, null project fields and `/projects`. Links are derived locally, never trusted from stored routes.
+
 ### API-44 — `POST /api/v1/activity/read`
 
 Request `{"throughSequence":42}`; integer must not exceed current workspace event high-water value available to this member. **200 data:** `{"readThroughSequence":42}`. Monotonic per-member update; concurrent reads can only increase it and do not alter shared event history or personal-preferences revision. This is an explicit companion endpoint to support persistent in-app notifications, not email delivery.
+
+F15: same-origin JSON POST, unknown fields/query/If-Match rejected. Through-sequence accepts safe integers from zero to the current workspace high water (422 otherwise). The result returns the actual monotonic member value, which can exceed the requested value. This naturally idempotent acknowledgement needs no command key and is safe to repeat after an unknown response; it cannot retry pipeline work. Opening/reading the drawer never marks events read automatically. All activity/read/operations responses use the normal private/no-store envelope and require current active membership. GET endpoints do not mutate event/read/provider/job state.
 
 ### API-45 — `GET /api/v1/operations`
 
@@ -1021,6 +1025,10 @@ No mutation/query body. **200 data:**
 ```
 
 Values are actual safe operational summaries, not a formal service-level guarantee or customer usage meter. No API key, provider balance per member, ciphertext, host filesystem paths, or public unauthenticated admin controls. Maintenance changes to provider budgets/credentials/allowlist remain operator configuration, not this read endpoint.
+
+F15 local projection replaces the illustrative example with actual implemented scope: `checkedAt`, `worker:{state:healthy|stale|not_started|disabled|draining,lastSeenAt,renderCapacity:1,activeRenders}`, `planningWorker:{state:healthy|stale|not_started,lastSeenAt}`, `providers:[{id:gemini|elevenlabs,state:observed|paused|disabled|unverified|exhausted,message}]`, `queues:{generationWaiting,planningWaiting,publishingNeedsReview:null}`, `scheduling:{enabled:false,reasonCode:NOT_IMPLEMENTED}`, `recovery:{scope:recent_projects,items}`. Fresh means a heartbeat within 30 seconds and nonexpired lease; it is not proof of renderer/voice/input compatibility. Active render leases include expired rendering/validating reservations, since expiry does not prove executor termination. Cached provider config/free-policy/expiry/uncertain-use and Gemini budget gates are checked without metadata refresh or inference; no balances/config hashes/raw reason bodies are returned.
+
+Recovery is bounded to up to ten live projects in the last 50 workspace events, not a complete incident queue. For each, read the newest generation, newest planning job per kind and failed storage of a locally rendered run using existing scoped indexes. Generation/storage recovery must match the current saved plan and brief; planning recovery must match the current brief. Cards contain stable `id,projectId,projectTitle,kind:planning|generation|storage,message,actionLabel,safeActionRoute`; code-to-guidance mappings never echo raw diagnostics. Expired render leases explicitly require operator termination evidence. Cards link to existing project controls and grant no retry, cancellation, quota change or publishing permission. No new database schema/migration or provider call is required.
 
 ## 18. State, retry, and race contracts
 
