@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildRenderPlan, generationHash, canonicalJson} from '../src/pipeline/render-contract.js';
-import {assembleSelected, selectedSrt} from '../src/pipeline/selected-timing.js';
+import {assembleSelected, selectedSrt, MeasuredDurationError} from '../src/pipeline/selected-timing.js';
+import {LiveGenerationEngine} from '../src/pipeline/generation-engine.js';
+import {GenerationFault} from '../apps/web/src/server/generation/engine';
 import {fitMeasured, wrapMeasured, computeSelectedLayout} from '../src/video/selected-layout.js';
 import {selectedFixture} from '../fixtures/selected-diagrams.js';
 import {renderSelectedVideo, selectedFontAssets, selectedRendererBuildHash} from '../src/pipeline/selected-renderer.js';
@@ -64,6 +66,19 @@ test('all supported target lengths use measured speech and deterministic reading
     const f = selectedFixture('en'); f.proposal.targetSeconds = f.settings.targetSeconds = targetSeconds;
     const plan = buildRenderPlan(f.proposal, f.brief, f.settings, pins), {clips} = setup();
     const timeline = assembleSelected(plan, generationHash(plan), clips, 'offline-diagnostic'); assert.equal(timeline.durationInFrames, targetSeconds * 30);
+  }
+});
+
+test('live adapter reports measured duration refusal without submitting speech or starting a renderer', async () => {
+  const engine = new LiveGenerationEngine(process.cwd(), {REMOTION_FREE_LICENSE_CONFIRMED: 'true'});
+  for (const language of ['en', 'te'] as const) {
+    const {plan, clips, hash} = setup(language);
+    for (const seconds of [12, 31]) {
+      const long = clips.map(c => ({...c, source: {provider: 'elevenlabs' as const, model: plan.settingsSnapshot.speech.model, voiceId: plan.settingsSnapshot.speech.voiceId}, audio: {...c.audio, samples: new Float32Array(seconds * 24000).fill(.2)}}));
+      assert.throws(() => assembleSelected(plan, hash, long, 'elevenlabs-evaluation'), MeasuredDurationError);
+      await assert.rejects(engine.render(randomUUID(), plan, hash, long, new AbortController().signal), e => e instanceof GenerationFault && e.code === 'NARRATION_DURATION_EXCEEDED' && !e.unknown);
+      await assert.rejects(engine.render(randomUUID(), plan, 'f'.repeat(64), long, new AbortController().signal), e => e instanceof Error && !(e instanceof GenerationFault) && /hash/.test(e.message));
+    }
   }
 });
 test('font measurement wraps at words/graphemes, keeps explicit narration breaks and refuses unreadable overflow', () => {

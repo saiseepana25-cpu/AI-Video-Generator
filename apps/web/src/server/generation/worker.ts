@@ -15,7 +15,7 @@ import {closeGenerationReservation} from './reservation';
 import {trySpeechReuse} from './speech-reuse';
 
 const activeStates = ['running', 'cancellation_requested'] as const;
-const safeError = (code: string) => ({code, retryable: false as const, message: code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
+const safeError = (code: string) => ({code, retryable: false as const, message: code === 'NARRATION_DURATION_EXCEEDED' ? 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.' : code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
 export class GenerationWorker {
   readonly owner = randomUUID();
   private busy = false;

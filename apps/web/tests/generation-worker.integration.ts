@@ -250,6 +250,21 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   test('renderer failure preserves known settled speech without claiming provider uncertainty', async () => {
     await approve(); engine.renderFailure = true; await worker.tick(); assert.equal((await run())!.state, 'failed'); assert.equal((await provider())!.state, 'enabled'); assert.equal((await provider())!.reservations[0].state, 'settled'); assert.equal(await db.collection('generation_local_artifacts').countDocuments(), 0);
   });
+  test('measured duration failure retains settled speech and returns actionable status without retrying', async () => {
+    await approve(); engine.duringRender = async () => {throw new GenerationFault('NARRATION_DURATION_EXCEEDED');};
+    await worker.tick();
+    const failed = (await run())!;
+    assert.equal(failed.state, 'failed'); assert.equal(failed.stage, 'rendering');
+    assert.deepEqual(failed.error, {code: 'NARRATION_DURATION_EXCEEDED', retryable: false, message: 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.'});
+    const status = await service.job(failed.jobId); assert.ok(status);
+    assert.deepEqual(status.error, failed.error);
+    assert.equal((await provider())!.state, 'enabled'); assert.equal((await provider())!.reservations[0].state, 'settled');
+    assert.equal(await db.collection('generation_speech_attempts').countDocuments({state: 'settled'}), 3);
+    assert.equal(await db.collection('generation_local_artifacts').countDocuments(), 0);
+    const calls = engine.speechCalls; await worker.tick(); await approve(); await worker.tick();
+    assert.equal(engine.speechCalls, calls); assert.equal(engine.renderCalls, 1);
+    assert.equal(await db.collection('generation_runs').countDocuments(), 1);
+  });
   test('a replacement recovers a submitted expired lease as uncertain and fences the old owner', async () => {
     await approve(); const started = deferred<void>(), release = deferred<MeasuredSpeech>(); engine.duringSpeech = async () => {started.resolve(); return release.promise;};
     const old = worker.tick(); await started.promise;

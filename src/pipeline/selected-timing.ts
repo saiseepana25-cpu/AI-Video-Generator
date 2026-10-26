@@ -2,6 +2,9 @@ import {generationHash, validateRenderPlan} from './render-contract.js';
 import type {SelectedClip, SelectedCue, SelectedVideoProps} from './selected-types.js';
 import type {Audio} from './wav.js';
 
+/** A correction to the reviewed plan is required; repeating speech cannot fix it. */
+export class MeasuredDurationError extends Error {}
+
 /** Measured phrase timing only. No estimated word boundaries or cross-language captions. */
 export function assembleSelected(raw: unknown, expectedHash: string, clips: SelectedClip[], mode: SelectedVideoProps['mode']) {
   const plan = validateRenderPlan(raw);
@@ -28,8 +31,8 @@ export function assembleSelected(raw: unknown, expectedHash: string, clips: Sele
   const spoken = ordered.reduce((n, c) => n + c.audio.samples.length, 0);
   const gap = Math.max(Math.ceil(timing.minimumGapMs * sampleRate / 1000), Math.floor((plan.targetSeconds * sampleRate - intro - outro - spoken) / ordered.length));
   const total = intro + spoken + ordered.length * gap + outro, durationInFrames = Math.ceil(total * fps / sampleRate);
-  if (durationInFrames > plan.settingsSnapshot.output.maxSeconds * fps) throw new Error('Measured narration exceeds 90 seconds. Shorten and approve a new plan.');
-  if (durationInFrames > (plan.targetSeconds + 3) * fps) throw new Error('Measured narration exceeds the selected target tolerance. Shorten and approve a new plan.');
+  if (durationInFrames > plan.settingsSnapshot.output.maxSeconds * fps) throw new MeasuredDurationError('Measured narration exceeds 90 seconds. Shorten and approve a new plan.');
+  if (durationInFrames > (plan.targetSeconds + 3) * fps) throw new MeasuredDurationError('Measured narration exceeds the selected target tolerance. Shorten and approve a new plan.');
   const samples = new Float32Array(Math.ceil(durationInFrames * sampleRate / fps)), cues: SelectedCue[] = [];
   let cursor = intro;
   for (const clip of ordered) {

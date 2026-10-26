@@ -14,6 +14,7 @@ import {renderSelectedVideo, selectedFontAssets, selectedRendererBuildHash} from
 import {encodeWav} from './wav.js';
 import {binary} from './probe.js';
 import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
+import {MeasuredDurationError} from './selected-timing.js';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
   capabilities = [...requiredCapabilities,brandPaletteCapability,brandLogoCapability];
@@ -39,7 +40,10 @@ export class LiveGenerationEngine implements GenerationEngine {
   async render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal, logo?:Buffer) {
     requireProjectId(runId);
     const result = await renderSelectedVideo({root: this.root, outputRoot: path.join(this.root, 'output', 'dashboard-renders', runId), plan, expectedHash: hash, clips, mode: 'elevenlabs-evaluation',
-      logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal});
+      logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal}).catch(error => {
+        if (error instanceof MeasuredDurationError) throw new GenerationFault('NARRATION_DURATION_EXCEEDED');
+        throw error;
+      });
     const id = path.basename(result.folder); requireProjectId(id);
     const manifest = await fs.readFile(path.join(result.folder, 'manifest.json'));
     if (sha(manifest) !== result.manifestHash) throw new GenerationFault('LOCAL_MANIFEST_CHANGED');
