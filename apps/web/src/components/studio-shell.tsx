@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import type {ReactNode} from 'react';
 import {BrandMark, Icon} from './icon';
+import {ActivityPanel} from './activity-panel';
 
 const navigation = [
   {href: '/projects', label: 'Projects', icon: 'projects'},
@@ -28,7 +29,7 @@ export function StudioShell({children,userName,workspaceName,accountControl}: {c
       <div className="local-identity"><span className="local-dot"/><div>{userName}<small>Signed in with Google</small></div></div>
     </aside>
     <div className="studio-body">
-      <header className="topbar"><span className="breadcrumb">Studio <span aria-hidden="true">/</span> <strong>{currentPage?.label ?? 'Workspace'}</strong></span>{accountControl}</header>
+      <header className="topbar"><span className="breadcrumb">Studio <span aria-hidden="true">/</span> <strong>{currentPage?.label ?? 'Workspace'}</strong></span><div className="studio-account-actions"><ActivityPanel/>{accountControl}</div></header>
       <main id="main-content" tabIndex={-1} className="main-content">{children}</main>
       <footer className="studio-footer"><span>Thoughtful videos start with a clear idea.</span><span>VideoCraft · Internal V1</span></footer>
     </div>

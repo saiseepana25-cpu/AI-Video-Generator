@@ -268,6 +268,8 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const calls = engine.speechCalls; await worker.tick(); await approve(); await worker.tick();
     assert.equal(engine.speechCalls, calls); assert.equal(engine.renderCalls, 1);
     assert.equal(await db.collection('generation_runs').countDocuments(), 1);
+    await approveRevision();
+    assert.deepEqual((await new OperationsService(client,name,context,providerEnv).read()).recovery.items,[]);
   });
   test('a replacement recovers a submitted expired lease as uncertain and fences the old owner', async () => {
     await approve(); const started = deferred<void>(), release = deferred<MeasuredSpeech>(); engine.duringSpeech = async () => {started.resolve(); return release.promise;};

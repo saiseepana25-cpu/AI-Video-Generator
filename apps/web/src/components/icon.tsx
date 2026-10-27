@@ -1,8 +1,9 @@
 import type {CSSProperties} from 'react';
 
-type IconName = 'projects' | 'calendar' | 'settings' | 'plus' | 'arrow' | 'play' | 'check';
+type IconName = 'projects' | 'calendar' | 'settings' | 'plus' | 'arrow' | 'play' | 'check' | 'activity';
 
 const paths: Record<IconName, React.ReactNode> = {
+  activity: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></>,
   projects: <><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2"/></>,
   settings: <><path d="m9 4 1-2h4l1 2 2 1 2 .2 2 3.6-1 1.8v2.8l1 1.8-2 3.6-2 .2-2 1-1 2h-4l-1-2-2-1-2-.2-2-3.6 1-1.8v-2.8L3 8.8l2-3.6L7 5Z"/><circle cx="12" cy="11.9" r="3"/></>,
