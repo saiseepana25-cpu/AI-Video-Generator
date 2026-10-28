@@ -1,5 +1,11 @@
 # VideoCraft — V1 Database Design
 
+## Pre-speech layout execution protocol (28 October 2026)
+
+No migration, index, validator, stage enum or stored-input change. The worker advertises `layout:font-measured-v1` in the existing bounded capability array; admission/claim/build fences refuse incompatible workers. For a claimed `running` run, actual-font spatial preflight executes outside transactions in the existing `plan_validation` stage, before any speech attempt/reuse record is created. It receives the validated immutable approval and pinned font bytes; renderer identity is checked before and after preflight. It opens only the trusted layout composition, never audio/video rendering. Its browser must close before control returns to speech processing. Cancellation/lease ownership/provider/project fences remain authoritative after preflight; no expired physical render is recovered by this check.
+
+Text-fit and local-check refusals finish with bounded safe `TEXT_LAYOUT_EXCEEDED` / `LAYOUT_CHECK_UNAVAILABLE` errors. With zero submissions, `closeGenerationReservation` releases/refunds only the original compatible unused hold under its existing config/period rules. No attempt/artifact/ready version is manufactured. A late renderer layout failure retains settled speech and the same safe text-correction code. Permanent command replay and exact version/hash deduplication are unchanged: failed approval cannot be blindly resubmitted as another job. Historical generic failures and completed manifests remain intact.
+
 ## F13a deployed slice — migration 014 (22 October 2026)
 
 `014_workspace_settings` preserves manifests 001–013. It widens only workspaces.defaults.preferredAccentId to nullable, extends the latest activity_events validator for workspace_settings_changed (nullable projectId, workspaceId-only resourceRefs), and adds strict workspace_settings_commands. Existing workspace/event rows remain valid. Command rows have UUID _id/workspaceId, member userId, SHA256 keyHash/requestHash, safe SettingsView snapshot and createdAt. Unique workspace_settings_replay_v1(workspaceId,userId,keyHash); no TTL. Shared revision remains BSON Long settingsRevision, independent of brandRevision and member preferencesRevision. No new membership schema is needed; writes use the existing internal generationGuardRevision membership fence.

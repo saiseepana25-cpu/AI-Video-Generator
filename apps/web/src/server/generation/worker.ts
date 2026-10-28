@@ -15,7 +15,7 @@ import {closeGenerationReservation} from './reservation';
 import {trySpeechReuse} from './speech-reuse';
 
 const activeStates = ['running', 'cancellation_requested'] as const;
-const safeError = (code: string) => ({code, retryable: false as const, message: code === 'NARRATION_DURATION_EXCEEDED' ? 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.' : code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
+const safeError = (code: string) => ({code, retryable: false as const, message: code === 'TEXT_LAYOUT_EXCEEDED' ? 'Text does not fit the readable video layout. Shorten narration, headings or diagram labels, save and check a new plan version, then approve it. No automatic retry.' : code === 'LAYOUT_CHECK_UNAVAILABLE' ? 'The font/layout check could not finish. No speech was requested. Ask the operator to verify local fonts and the browser before reviewing a new version.' : code === 'NARRATION_DURATION_EXCEEDED' ? 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.' : code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
 export class GenerationWorker {
   readonly owner = randomUUID();
   private busy = false;
@@ -151,6 +151,9 @@ export class GenerationWorker {
       try {
         const logoObject=await this.approvedLogo(run,plan);let logo:Buffer|undefined;
         if(logoObject){if(!this.engine.logo)throw new GenerationFault('ENGINE_NOT_CAPABLE');logo=verifiedLogoBytes(plan.settingsSnapshot.brand.logoAsset,await this.engine.logo(logoObject,controller.signal))!;await this.approvedLogo(run,plan);}
+        const preflight = await this.engine.preflight(plan, run.inputHash, controller.signal);
+        controller.signal.throwIfAborted();
+        if (preflight.rendererBuildHash !== run.rendererBuildHash) throw new GenerationFault('RENDERER_CHANGED');
         const clips: SpeechClip[] = [];
         for (const segment of plan.narration) {
           const reused=await trySpeechReuse(this.client,this.name,this.env,this.engine,run,plan,segment.segmentId,controller.signal,async(db,session)=>{const owned=await this.owned(db,session,run);await this.guardLogo(db,session,run,plan);return owned;});

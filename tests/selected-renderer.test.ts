@@ -4,7 +4,8 @@ import {buildRenderPlan, generationHash, canonicalJson} from '../src/pipeline/re
 import {assembleSelected, selectedSrt, MeasuredDurationError} from '../src/pipeline/selected-timing.js';
 import {LiveGenerationEngine} from '../src/pipeline/generation-engine.js';
 import {GenerationFault} from '../apps/web/src/server/generation/engine';
-import {fitMeasured, wrapMeasured, computeSelectedLayout} from '../src/video/selected-layout.js';
+import {fitMeasured, wrapMeasured, computeSelectedLayout, computeSpatialLayout, TextLayoutError} from '../src/video/selected-layout.js';
+import {preflightSelectedLayout} from '../src/pipeline/layout-preflight';
 import {selectedFixture} from '../fixtures/selected-diagrams.js';
 import {renderSelectedVideo, selectedFontAssets, selectedRendererBuildHash} from '../src/pipeline/selected-renderer.js';
 import type {SelectedClip, SelectedVideoProps} from '../src/pipeline/selected-types.js';
@@ -113,4 +114,29 @@ test('adapter pins the actual installed web fonts and build identity is determin
   const {pins} = await selectedFontAssets(process.cwd()); assert.ok(Object.values(pins).every(p => /^[a-f0-9]{64}$/.test(p)));
   assert.equal(await selectedRendererBuildHash(process.cwd(), pins), await selectedRendererBuildHash(process.cwd(), pins));
   assert.notEqual(await selectedRendererBuildHash(process.cwd(), pins), await selectedRendererBuildHash(process.cwd(), {...pins, body: 'f'.repeat(64)}));
+});
+
+test('spatial preflight checks approved English/Telugu text without audio, cues or invented timings', () => {
+  for (const language of ['en', 'te'] as const) {
+    const {plan} = setup(language), before = canonicalJson(plan), measure = (_r:unknown,s:string,z:number) => [...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(s)].length*z*.4;
+    const spatial = computeSpatialLayout(plan,measure);
+    assert.equal(spatial.scenes.length,3);assert.ok(spatial.scenes.every(s=>s.caption.lines.length<=2));assert.equal(canonicalJson(plan),before);
+    for (const field of ['caption','heading','label','title']) {
+      const invalid=structuredClone(plan),text=(language==='te'?'నీరు ':'Water ').repeat(200);
+      if(field==='caption')invalid.captions[0].text=text;
+      else if(field==='heading')invalid.scenes[0].props.heading=text;
+      else if(field==='label')invalid.scenes[0].props.nodes[0].label=text;
+      else invalid.title=text;
+      assert.throws(()=>computeSpatialLayout(invalid,measure),TextLayoutError);
+    }
+  }
+});
+
+test('preflight rejects changed approval/font identity or early abort without starting a browser',async()=>{
+  const {plan,hash}=setup(),signal=new AbortController().signal;
+  await assert.rejects(preflightSelectedLayout({root:'/not-a-project',plan,expectedHash:hash,signal:AbortSignal.abort()}),e=>e instanceof Error&&e.name==='AbortError');
+  await assert.rejects(preflightSelectedLayout({root:'/not-a-project',plan,expectedHash:'f'.repeat(64),signal}),/hash/);
+  await assert.rejects(preflightSelectedLayout({root:process.cwd(),plan,expectedHash:hash,signal}),/font bytes changed/);
+  const engine=new LiveGenerationEngine(process.cwd(),{});
+  await assert.rejects(engine.preflight(plan,hash,signal),e=>e instanceof GenerationFault&&e.code==='LAYOUT_CHECK_UNAVAILABLE'&&!e.unknown);
 });

@@ -28,6 +28,7 @@
     "render:diagrams": "tsx scripts/render-diagrams.ts",
     "studio": "remotion studio src/video/index.tsx",
     "test": "tsx --test tests/*.test.ts",
+    "test:layout": "tsx --test tests/selected-layout.integration.ts",
     "typecheck": "tsc --noEmit",
     "verify:media": "tsx scripts/verify-media.ts",
     "web:planning": "npm --prefix apps/web run planning --",

@@ -8,6 +8,7 @@ export class GenerationFault extends Error {constructor(public readonly code: st
 export interface GenerationEngine {
   capabilities: string[];
   inspect(): Promise<{rendererBuildHash: string; fonts: FontPins}>;
+  preflight(plan: RenderPlan, hash: string, signal: AbortSignal): Promise<{rendererBuildHash: string}>;
   observe(): Promise<Observation>;
   speech(plan: RenderPlan, segmentId: string, signal: AbortSignal): Promise<MeasuredSpeech>;
   persistSpeech(runId: string, attemptId: string, audio: MeasuredSpeech): Promise<{audioHash: string; byteLength: number}>;

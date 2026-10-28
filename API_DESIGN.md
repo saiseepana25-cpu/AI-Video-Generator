@@ -1,5 +1,11 @@
 # VideoCraft — V1 API Design
 
+## Pre-speech layout validation increment (28 October 2026)
+
+The existing generation worker now performs pinned-font spatial checks before speech requests or audio reuse, while the job remains `running` / `plan_validation`. It does not invent audio timings or generate media during this check. Two-line captions, title space (including a captured logo), headings, diagram labels and glyph heights use the same layout implementation as rendering. `TEXT_LAYOUT_EXCEEDED` is a terminal correction outcome: shorten text, save/check a new version and explicitly approve it. The existing job error/recovery UI presents that safe message. `LAYOUT_CHECK_UNAVAILABLE` reports a failed local font/browser check without claiming a text-fit failure; no speech has been requested on that path. Unused reservation settlement follows the existing conservative rules. Neither code is an automatic retry or permission to bypass current provider gates.
+
+`GET /plans/{id}/render-input` remains static compilation, not a headless browser request. A successful check still cannot guarantee measured speech duration or reading rate. Admission requires the additional worker capability `layout:font-measured-v1` and compatible current renderer build; workers without the check cannot accept new approvals. No endpoint, request/response field, immutable input/hash, or schema changed. Existing approvals/ready outputs are not rewritten. The final renderer still verifies actual audio timing/readability and can return `TEXT_LAYOUT_EXCEEDED` if a text-fit failure occurs there; previously consumed speech stays settled, not refunded.
+
 ## F13a deployed slice — shared workspace defaults (22 October 2026)
 
 API-27 GET `/api/v1/workspace/settings` and API-28 PATCH are implemented for active team members. Responses use the standard private/no-store data/meta envelope, Vary Cookie, nosniff and request ID. GET data is `{revision,timezone,defaults:{language,targetSeconds,preferredVoiceCatalogId,preferredAccentId,themeId,captionStyleId},brandKitRevisionId}`. Legacy bootstrap's unresolved `indian` accent is projected as null when no voice is selected; GET performs no rewrite. New workspaces start with null voice/accent. Defaults expose safe catalog IDs only, never provider credentials, raw voice IDs or allowlists.

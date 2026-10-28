@@ -15,6 +15,8 @@ import {encodeWav} from './wav.js';
 import {binary} from './probe.js';
 import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
 import {MeasuredDurationError} from './selected-timing.js';
+import {preflightSelectedLayout} from './layout-preflight';
+import {TextLayoutError} from '../video/selected-layout';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
   capabilities = [...requiredCapabilities,brandPaletteCapability,brandLogoCapability];
@@ -27,6 +29,13 @@ export class LiveGenerationEngine implements GenerationEngine {
     const {pins} = await selectedFontAssets(this.root); return {fonts: pins, rendererBuildHash: await selectedRendererBuildHash(this.root, pins)};
   }
   async observe() {try {return await new ProviderGateway(this.env).observe('elevenlabs');} catch {throw new GenerationFault('FREE_SPEECH_UNAVAILABLE');}}
+  async preflight(plan: RenderPlan, hash: string, signal: AbortSignal) {
+    try {return await preflightSelectedLayout({root: this.root, plan, expectedHash: hash, signal});}
+    catch (error) {
+      signal.throwIfAborted();
+      throw new GenerationFault(error instanceof TextLayoutError ? 'TEXT_LAYOUT_EXCEEDED' : 'LAYOUT_CHECK_UNAVAILABLE');
+    }
+  }
   speech(plan: RenderPlan, segmentId: string, signal: AbortSignal) {return new GenerationSpeechGateway(this.env).synthesize(plan, segmentId, signal);}
   readSpeech(source: SpeechFile, signal: AbortSignal) {return readVerifiedSpeech(this.root,source,signal);}
   async persistSpeech(runId: string, attemptId: string, audio: MeasuredSpeech) {
@@ -42,6 +51,7 @@ export class LiveGenerationEngine implements GenerationEngine {
     const result = await renderSelectedVideo({root: this.root, outputRoot: path.join(this.root, 'output', 'dashboard-renders', runId), plan, expectedHash: hash, clips, mode: 'elevenlabs-evaluation',
       logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal}).catch(error => {
         if (error instanceof MeasuredDurationError) throw new GenerationFault('NARRATION_DURATION_EXCEEDED');
+        if (error instanceof TextLayoutError) throw new GenerationFault('TEXT_LAYOUT_EXCEEDED');
         throw error;
       });
     const id = path.basename(result.folder); requireProjectId(id);

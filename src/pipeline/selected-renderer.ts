@@ -10,6 +10,7 @@ import {canonicalJson, type FontPins} from './render-contract.js';
 import type {SelectedClip, SelectedVideoProps} from './selected-types.js';
 import {encodeWav} from './wav.js';
 import {inspectVideo} from './probe.js';
+import {TextLayoutError, isTextLayoutRefusal} from '../video/selected-layout';
 
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 async function fileHash(file: string) {
@@ -28,6 +29,7 @@ export async function selectedFontAssets(root: string) {
 }
 export async function selectedRendererBuildHash(root: string, pins: FontPins) {
   const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'apps/web/src/server/brand/palette.ts', 'src/pipeline/logo-bytes.ts','apps/web/src/server/logos/bytes.ts','apps/web/src/server/brand/logo.ts','package-lock.json'];
+  files.push('src/video/selected-preflight-index.tsx', 'src/video/selected-font-layout.ts', 'src/pipeline/layout-preflight.ts');
   const parts = await Promise.all(files.map(async file => ({file, sha256: sha(await fs.readFile(path.join(root, file)))})));
   return sha(canonicalJson({adapter: 'educational-diagrams-renderer-v1', pins, files: parts}));
 }
@@ -92,6 +94,8 @@ export async function renderSelectedVideo(options: {root: string; outputRoot: st
   } catch (error) {
     manifest.state = options.signal?.aborted ? 'cancelled' : 'failed'; manifest.failedStage = stage;
     manifest.error = stage === 'layout' ? 'Local text/font layout did not finish. Shorten overflowing captions/headings/labels and verify installed fonts.' : `Local video ${stage} did not finish. No provider fallback was performed.`;
-    await saveManifest(); throw new Error(manifest.error as string, {cause: error});
+    await saveManifest();
+    if (stage === 'layout' && isTextLayoutRefusal(error)) throw new TextLayoutError('Approved text does not fit at a readable size.');
+    throw new Error(manifest.error as string, {cause: error});
   } finally {await browser?.close({silent: true}).catch(() => undefined);}
 }

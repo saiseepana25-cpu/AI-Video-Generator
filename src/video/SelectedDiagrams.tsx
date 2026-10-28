@@ -1,35 +1,11 @@
 import React, {useEffect, useState} from 'react';
 import {AbsoluteFill, Audio, Img, cancelRender, continueRender, delayRender, interpolate, staticFile, useCurrentFrame} from 'remotion';
 import type {SelectedVideoProps, TextLayout} from '../pipeline/selected-types.js';
-import {computeSelectedLayout} from './selected-layout';
+import {loadSelectedFonts, selectedFamily as family} from './selected-font-layout';
+export {loadSelectedFonts, resolveSelectedProps} from './selected-font-layout';
 
 // All assets are supplied by the trusted adapter after checking their SHA256.
-export async function loadSelectedFonts() {
-  for (const role of ['heading', 'body', 'telugu'] as const) {
-    const font = new FontFace(`VC-${role}`, `url("${staticFile(`fonts/${role}.woff2`)}")`, {weight: '400', style: 'normal'});
-    document.fonts.add(await font.load());
-  }
-  await document.fonts.ready;
-}
-const family = (language: string, role: 'heading' | 'body') => language === 'te' ? `"VC-telugu", "VC-${role}"` : `"VC-${role}"`;
 const Block: React.FC<{layout: TextLayout; language: string; role?: 'heading' | 'body'; centered?: boolean}> = ({layout, language, role = 'body', centered = false}) => <div style={{fontFamily: family(language, role), fontWeight: 400, fontSize: layout.fontSize, lineHeight: `${layout.lineHeight}px`, textAlign: centered ? 'center' : 'left', whiteSpace: 'pre'}}>{layout.lines.map((line, i) => <div key={i}>{line || '\u00a0'}</div>)}</div>;
-
-export async function resolveSelectedProps(props: SelectedVideoProps): Promise<SelectedVideoProps> {
-  await loadSelectedFonts();
-  const context = document.createElement('canvas').getContext('2d');
-  if (!context) throw new Error('Text measurement is unavailable.');
-  const layout = computeSelectedLayout(props, (role, text, size) => {
-    context.font = `400 ${size}px ${family(props.plan.language, role)}`;
-    return context.measureText(text).width;
-  });
-  const checkHeight = (block: TextLayout, role: 'heading' | 'body') => {
-    context.font = `400 ${block.fontSize}px ${family(props.plan.language, role)}`;
-    if (block.lines.some(line => {const metrics = context.measureText(line); return metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent > block.lineHeight;})) throw new Error('Glyph height exceeds the readable text area. Review shorter text.');
-  };
-  checkHeight(layout.title, 'heading');
-  for (const scene of layout.scenes) {checkHeight(scene.heading, 'heading'); checkHeight(scene.caption, 'body'); scene.labels.forEach(label => checkHeight(label, 'body'));}
-  return {...props, layout};
-}
 
 export const SelectedDiagrams: React.FC<SelectedVideoProps> = props => {
   const frame = useCurrentFrame(), {plan, cues} = props;

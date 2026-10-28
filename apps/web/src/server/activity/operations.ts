@@ -10,6 +10,8 @@ import type {Operations,RecoveryItem} from './contracts';
 export function recoveryMessage(kind:RecoveryItem['kind'],code:unknown,expiredRender=false){
   if(expiredRender)return 'The renderer stopped reporting. An operator must confirm that it has stopped before recovering its slot. Do not start a replacement render.';
   if(code==='NARRATION_DURATION_EXCEEDED')return 'Narration is too long. Shorten it, save and check a new plan version, then approve that version before generating again.';
+  if(code==='TEXT_LAYOUT_EXCEEDED')return 'Video text does not fit. Shorten narration, headings or diagram labels, save and check a new version, then approve it.';
+  if(code==='LAYOUT_CHECK_UNAVAILABLE')return 'The local font/layout check could not finish. No speech was requested. Ask the operator to verify the fonts and browser.';
   if(code==='SPEECH_OUTCOME_UNKNOWN'||code==='PROVIDER_OUTCOME_UNKNOWN')return 'A provider request has an uncertain outcome. Ask the operator to review usage; do not repeat it blindly.';
   if(kind==='storage')return 'Private video storage needs review. Ask the operator to check storage status; a storage retry must not regenerate speech or video.';
   return kind==='planning'?'Planning needs review. Open the saved idea to inspect its current status and available recovery actions.':'Video generation needs review. Open the saved plan and current status before preparing another version.';

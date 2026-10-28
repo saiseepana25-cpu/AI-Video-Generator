@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Pre-speech layout safety
+
+The local generation worker measures approved caption/heading/diagram text using pinned fonts before any speech request or reuse. Overflow fails with `TEXT_LAYOUT_EXCEEDED`; unavailable fonts/browser fail with `LAYOUT_CHECK_UNAVAILABLE`. Review, shorten and save/check a new plan version before approving another attempt. Static dashboard checks do not start Chrome or guarantee measured duration. Restart an old generation worker after updating code; admission requires `layout:font-measured-v1` and the current renderer build. Existing stored videos keep their original identity and remain playable.
+
+`npm run test:layout` is an explicit local Chrome/font integration suite for English/Telugu fitting and overflow, with no credentials, AI requests, speech, database or R2 use. The regular root tests remain `npm test`; the runnable root video prototype is unchanged.
+
 ## Retiring obsolete speech-reuse references (F14c5b)
 
 Apply/audit migration **024** and restart app/workers. After deleted-project ready-media and local-render cleanup, an operator can run:

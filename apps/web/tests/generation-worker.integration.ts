@@ -58,6 +58,8 @@ class FakeEngine implements GenerationEngine {
   reuseEnabled=false; reuseReads=0; duringRead?:()=>Promise<MeasuredSpeech>;
   readSpeech=async()=>{this.reuseReads++;if(!this.reuseEnabled)throw new Error('missing');return this.duringRead?this.duringRead():audio();};
   inspect = async () => ({rendererBuildHash: this.build, fonts: pins});
+  preflightCalls = 0; duringPreflight?: (signal: AbortSignal) => Promise<void>;
+  preflight = async (_plan:unknown,_hash:string,signal:AbortSignal) => {this.preflightCalls++; await this.duringPreflight?.(signal); return {rendererBuildHash:this.build};};
   observe = async () => {await this.beforeObservation?.(); return {state: 'enabled' as const, reasonCode: null, languages: ['en', 'te'] as ('en'|'te')[], remaining: this.remaining, periodId: 'test-period'};};
   speech = async () => {this.speechCalls++; return this.duringSpeech ? this.duringSpeech() : audio();};
   persistSpeech = async () => {if (this.persistFailure) throw new Error('disk'); return {audioHash: 'e'.repeat(64), byteLength: 48044};};
@@ -142,6 +144,38 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal(await db.collection('generation_speech_attempts').countDocuments({runId:next._id}),0);
     assert.equal((await provider())!.allowance.observedRemaining,remaining);assert.equal((await provider())!.reservations.some(r=>r.id===next.reservationId),false);
     await assert.rejects(db.collection<Row>('generation_speech_reuses').insertOne({...refs[0],_id:randomUUID()}), (e:unknown)=>!!e&&typeof e==='object'&&'code'in e&&e.code===11000);
+  });
+  for (const code of ['TEXT_LAYOUT_EXCEEDED','LAYOUT_CHECK_UNAVAILABLE']) test(`pre-speech ${code} releases unused reservation and exposes safe recovery without submission/reuse`,async()=>{
+    await approve();engine.duringPreflight=async()=>{throw new GenerationFault(code);};
+    await worker.tick();const failed=(await run())!;
+    assert.equal(failed.state,'failed');assert.equal(failed.stage,'plan_validation');assert.equal(failed.error?.code,code);
+    assert.ok(failed.error!.message.length<=240);assert.equal(failed.error!.retryable,false);
+    assert.equal(engine.preflightCalls,1);assert.equal(engine.speechCalls,0);assert.equal(engine.reuseReads,0);assert.equal(engine.renderCalls,0);
+    assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);
+    assert.equal((await provider())!.reservations.length,0);assert.equal((await provider())!.allowance.observedRemaining,10000);assert.equal((await provider())!.state,'enabled');
+    const status=await service.job(failed.jobId);assert.deepEqual(status!.error,failed.error);
+    const recovery=await new OperationsService(client,name,context,providerEnv).read();assert.equal(recovery.recovery.items.length,1);assert.match(recovery.recovery.items[0].message,code==='TEXT_LAYOUT_EXCEEDED'?/Shorten narration/:/fonts and browser/);
+    await approve();await worker.tick();assert.equal(engine.preflightCalls,1);assert.equal(await db.collection('generation_runs').countDocuments(),1);
+  });
+  test('speech waits for successful preflight; the approved input then completes normally',async()=>{
+    const started=deferred<void>(),release=deferred<void>();await approve();
+    engine.duringPreflight=async()=>{started.resolve();await release.promise;};const ticking=worker.tick();await started.promise;
+    assert.equal((await run())!.stage,'plan_validation');assert.equal(engine.speechCalls,0);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);
+    release.resolve();await ticking;assert.equal((await run())!.state,'rendered_local');assert.equal(engine.speechCalls,3);assert.equal(engine.preflightCalls,1);
+  });
+  test('cancellation during preflight stops before speech or artifact creation',async()=>{
+    const started=deferred<void>(),release=deferred<void>();await approve();engine.duringPreflight=async()=>{started.resolve();await release.promise;};
+    const ticking=worker.tick();await started.promise;await cancelCurrent();release.resolve();await ticking;
+    assert.equal((await run())!.state,'cancelled');assert.equal(engine.speechCalls,0);assert.equal(engine.renderCalls,0);assert.equal((await provider())!.reservations.length,0);
+  });
+  test('preflight build mismatch is fenced before speech',async()=>{
+    await approve();engine.duringPreflight=async()=>{engine.build='e'.repeat(64);};await worker.tick();
+    assert.equal((await run())!.error?.code,'RENDERER_CHANGED');assert.equal(engine.speechCalls,0);assert.equal((await provider())!.reservations.length,0);
+  });
+  test('a final renderer text-fit refusal retains consumed speech and reports correction rather than automatic retry',async()=>{
+    await approve();engine.duringRender=async()=>{throw new GenerationFault('TEXT_LAYOUT_EXCEEDED');};await worker.tick();
+    const failed=(await run())!;assert.equal(failed.error?.code,'TEXT_LAYOUT_EXCEEDED');assert.match(failed.error!.message,/new plan version/);
+    assert.equal(failed.stage,'rendering');assert.equal((await provider())!.reservations[0].state,'settled');assert.equal(engine.speechCalls,3);assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);
   });
   async function checkpointSpeech(attempt:SpeechAttempt){const now=new Date();await db.collection<SpeechCleanupTask>('speech_cleanup_tasks').insertOne({_id:attempt._id,workspaceId:testWorkspaceId,projectId,source:{runId:attempt.runId,attemptId:attempt._id,audioHash:attempt.audioHash!,byteLength:attempt.byteLength!,sampleRate:24000,inputHash:attempt.inputHash,providerConfigHash:attempt.providerConfigHash,textHash:attempt.textHash,segmentId:attempt.segmentId},rootHash:'c'.repeat(64),state:'pending',revision:Long.ONE,attempts:Long.ONE,error:null,createdAt:now,updatedAt:now,removedAt:null});}
   test('speech reuse skips cleanup-checkpointed sources before reading their audio',async()=>{
