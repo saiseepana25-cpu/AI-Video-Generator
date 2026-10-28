@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Live pacing limits
+
+New live videos use measured speech and at most two seconds of added hold per scene, within the existing 30–33/57–63/87–90-second windows. Very short narration now fails with `NARRATION_TOO_SHORT` instead of creating long silent gaps. Expand the plan or choose a shorter supported target, save/check a new version and approve it. The app does not cut/speed up speech or retry automatically; used clips and earlier ready videos remain retained. Restart the generation worker after updating because new approvals require `timing:bounded-holds-v1` and the current build. Pacing is checked after measured audio exists, separately from pre-speech font layout.
+
+`render:diagrams -- --diagnostic` keeps its explicitly offline, non-ready target-fill behavior so the original layout/prototype checks remain runnable. A diagnostic clip is not evidence of live voice/pacing quality or permission to publish.
+
 ## Local generation worker recovery
 
 Run `npm run web:generation -- worker` when ready to process already approved work. Temporary idle database failures now get three retries after 2, 4 and 8 seconds; persistent failure stops. Logs use safe structured reason codes. This does not retry a video, speech request, approval or uncertain outcome. Startup/readiness/configuration errors and unresolved failures after claim still stop; inspect retained job/provider status before restarting. Do not clear a rendering lease merely because it expired.

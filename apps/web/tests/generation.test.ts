@@ -26,6 +26,7 @@ test('worker gate requires fresh healthy exact contract, timing, fonts and capab
   const worker: GenerationWorker = {_id: 'generation:local', owner: randomUUID(), revision: Long.ONE, state: 'healthy', contract: plan.contract,
     compilerVersion: plan.settingsSnapshot.compilerVersion, rendererBuildHash: 'd'.repeat(64), capabilities: requiredCapabilities, fonts: pins, heartbeatAt: now, expiresAt: new Date(now.getTime() + 30000)};
   assert.equal(compatibleWorker(worker, plan, now), true);
+  assert.equal(compatibleWorker({...worker,capabilities:worker.capabilities.filter(c=>c!=='timing:bounded-holds-v1')},plan,now),false);
   const f=renderFixture(),id=randomUUID(),branded=buildRenderPlan(f.proposal,f.brief,{...f.settings,brandKitRevisionId:id},pins,{...initialBrand,revisionId:id});
   assert.equal(compatibleWorker(worker,branded,now),false);
   assert.equal(compatibleWorker({...worker,capabilities:[...requiredCapabilities,brandPaletteCapability]},branded,now),true);

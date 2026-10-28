@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {buildRenderPlan, generationHash, canonicalJson} from '../src/pipeline/render-contract.js';
-import {assembleSelected, selectedSrt, MeasuredDurationError} from '../src/pipeline/selected-timing.js';
+import {assembleSelected, selectedSrt, MeasuredDurationError,MeasuredPacingError} from '../src/pipeline/selected-timing.js';
 import {LiveGenerationEngine} from '../src/pipeline/generation-engine.js';
 import {GenerationFault} from '../apps/web/src/server/generation/engine';
 import {fitMeasured, wrapMeasured, computeSelectedLayout, computeSpatialLayout, TextLayoutError} from '../src/video/selected-layout.js';
@@ -48,7 +48,7 @@ test('approval mismatch, text mismatch, duplicate/missing/extra clips and change
   assert.throws(() => assembleSelected(plan, 'f'.repeat(64), clips, 'offline-diagnostic'), /hash/);
   for (const bad of [clips.slice(1), [...clips, clips[0]], [clips[0], clips[0], clips[2]], [{...clips[0], text: 'Other text'}, ...clips.slice(1)]]) assert.throws(() => assembleSelected(plan, hash, bad, 'offline-diagnostic'));
   assert.throws(() => assembleSelected(plan, hash, clips, 'elevenlabs-evaluation'), /pinned voice/);
-  const valid = clips.map(c => ({...c, source: {provider: 'elevenlabs' as const, model: plan.settingsSnapshot.speech.model, voiceId: plan.settingsSnapshot.speech.voiceId}}));
+  const valid = clips.map(c => ({...c,audio:{...c.audio,samples:new Float32Array(9*24000).fill(.2)}, source: {provider: 'elevenlabs' as const, model: plan.settingsSnapshot.speech.model, voiceId: plan.settingsSnapshot.speech.voiceId}}));
   assert.equal(assembleSelected(plan, hash, valid, 'elevenlabs-evaluation').sourceMode, 'elevenlabs-evaluation');
   assert.throws(() => assembleSelected(plan, hash, valid.map(c => ({...c, source: {...c.source, voiceId: 'other'}})), 'elevenlabs-evaluation'), /pinned voice/);
 });
@@ -67,6 +67,45 @@ test('all supported target lengths use measured speech and deterministic reading
     const f = selectedFixture('en'); f.proposal.targetSeconds = f.settings.targetSeconds = targetSeconds;
     const plan = buildRenderPlan(f.proposal, f.brief, f.settings, pins), {clips} = setup();
     const timeline = assembleSelected(plan, generationHash(plan), clips, 'offline-diagnostic'); assert.equal(timeline.durationInFrames, targetSeconds * 30);
+  }
+});
+
+test('live pacing uses measured samples and bounded holds within every supported duration window',()=>{
+  for(const language of ['en','te'] as const)for(const [targetSeconds,clipSeconds,minimum] of [[30,9,30],[60,18,57],[90,28.5,87]] as const){
+    const f=selectedFixture(language);f.proposal.targetSeconds=f.settings.targetSeconds=targetSeconds;
+    const plan=buildRenderPlan(f.proposal,f.brief,f.settings,pins),{clips}=setup(language);
+    const live=clips.map(c=>({...c,audio:{sampleRate:24000,samples:new Float32Array(clipSeconds*24000).fill(.2)},source:{provider:'elevenlabs' as const,model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}}));
+    const t=assembleSelected(plan,generationHash(plan),live,'elevenlabs-evaluation');
+    assert.equal(t.durationInFrames,minimum*30);assert.equal(t.pacing.policy,'bounded-scene-holds-v1');assert.ok(t.pacing.scenePauseSeconds>=.12&&t.pacing.scenePauseSeconds<=2);
+    t.cues.forEach((cue,i)=>{assert.equal(cue.sampleEnd-cue.sampleStart,live[i].audio.samples.length);assert.deepEqual(t.audio.samples.slice(cue.sampleStart,cue.sampleEnd),live[i].audio.samples);assert.equal(cue.text,plan.narration[i].text);assert.equal(cue.startFrame,Math.round(cue.sampleStart*30/24000));assert.equal(cue.speechEndFrame,Math.round(cue.sampleEnd*30/24000));});
+    assert.equal(canonicalJson(t.plan),canonicalJson(plan));
+  }
+});
+
+test('live pacing adds no target-fill padding when natural audio already fits the window',()=>{
+  for(const [targetSeconds,clipSeconds] of [[30,10],[60,20],[90,29]] as const){
+    const f=selectedFixture('en');f.proposal.targetSeconds=f.settings.targetSeconds=targetSeconds;
+    const plan=buildRenderPlan(f.proposal,f.brief,f.settings,pins),{clips}=setup();
+    const live=clips.map(c=>({...c,audio:{sampleRate:24000,samples:new Float32Array(clipSeconds*24000).fill(.2)},source:{provider:'elevenlabs' as const,model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}}));
+    const t=assembleSelected(plan,generationHash(plan),live,'elevenlabs-evaluation');assert.equal(t.pacing.scenePauseSeconds,.12);assert.equal(t.pacing.addedPauseSeconds,.36);assert.equal(t.durationInFrames,Math.ceil((clipSeconds*3+1.26)*30));
+  }
+});
+
+test('two-second added-hold boundary is sample-exact and shorter narration refuses instead of stretching',()=>{
+  const {plan,clips,hash}=setup();
+  const live=(count:number)=>clips.map(c=>({...c,audio:{sampleRate:24000,samples:new Float32Array(count).fill(.2)},source:{provider:'elevenlabs' as const,model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}}));
+  const count=184800,t=assembleSelected(plan,hash,live(count),'elevenlabs-evaluation');assert.equal(t.pacing.scenePauseSeconds,2);assert.equal(t.durationInFrames,900);
+  assert.throws(()=>assembleSelected(plan,hash,live(count-1),'elevenlabs-evaluation'),MeasuredPacingError);
+  const diagnostic=assembleSelected(plan,hash,clips,'offline-diagnostic');assert.equal(diagnostic.durationInFrames,900);assert.equal(diagnostic.pacing.policy,'diagnostic-target-fill-v1');assert.ok(diagnostic.pacing.scenePauseSeconds>2);
+});
+
+test('short live narration gets an actionable pacing refusal before fonts, files or a renderer',async()=>{
+  for(const language of ['en','te'] as const){
+    const {plan,clips,hash}=setup(language),seconds=[4.48,5.04,4.56];
+    const live=clips.map((c,i)=>({...c,audio:{sampleRate:24000,samples:new Float32Array(Math.round(seconds[i]*24000)).fill(.2)},source:{provider:'elevenlabs' as const,model:plan.settingsSnapshot.speech.model,voiceId:plan.settingsSnapshot.speech.voiceId}}));
+    assert.throws(()=>assembleSelected(plan,hash,live,'elevenlabs-evaluation'),MeasuredPacingError);
+    const engine=new LiveGenerationEngine('/not-a-project',{REMOTION_FREE_LICENSE_CONFIRMED:'true'});
+    await assert.rejects(engine.render(randomUUID(),plan,hash,live,new AbortController().signal),e=>e instanceof GenerationFault&&e.code==='NARRATION_TOO_SHORT'&&!e.unknown);
   }
 });
 

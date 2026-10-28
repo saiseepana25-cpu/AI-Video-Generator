@@ -4,6 +4,8 @@ import type {Audio} from './wav.js';
 
 /** A correction to the reviewed plan is required; repeating speech cannot fix it. */
 export class MeasuredDurationError extends Error {}
+export class MeasuredPacingError extends Error {}
+export const livePacingPolicy = {version:'bounded-scene-holds-v1',maxGapMs:2000} as const;
 
 /** Measured phrase timing only. No estimated word boundaries or cross-language captions. */
 export function assembleSelected(raw: unknown, expectedHash: string, clips: SelectedClip[], mode: SelectedVideoProps['mode']) {
@@ -29,10 +31,16 @@ export function assembleSelected(raw: unknown, expectedHash: string, clips: Sele
   const timing = plan.settingsSnapshot.timing;
   const intro = Math.round(timing.introMs * sampleRate / 1000), outro = Math.round(timing.outroMs * sampleRate / 1000);
   const spoken = ordered.reduce((n, c) => n + c.audio.samples.length, 0);
-  const gap = Math.max(Math.ceil(timing.minimumGapMs * sampleRate / 1000), Math.floor((plan.targetSeconds * sampleRate - intro - outro - spoken) / ordered.length));
+  const live=mode==='elevenlabs-evaluation';
+  // Live output uses the allowed duration window, never unbounded padding to
+  // the nominal target. Diagnostic layout samples retain their old behavior.
+  const lowerSeconds=live?Math.max(30,plan.targetSeconds-3):plan.targetSeconds;
+  const requiredGap=(lowerSeconds*sampleRate-intro-outro-spoken)/ordered.length;
+  const gap=Math.max(Math.ceil(timing.minimumGapMs*sampleRate/1000),live?Math.ceil(requiredGap):Math.floor(requiredGap));
   const total = intro + spoken + ordered.length * gap + outro, durationInFrames = Math.ceil(total * fps / sampleRate);
   if (durationInFrames > plan.settingsSnapshot.output.maxSeconds * fps) throw new MeasuredDurationError('Measured narration exceeds 90 seconds. Shorten and approve a new plan.');
   if (durationInFrames > (plan.targetSeconds + 3) * fps) throw new MeasuredDurationError('Measured narration exceeds the selected target tolerance. Shorten and approve a new plan.');
+  if(live&&gap>Math.floor(livePacingPolicy.maxGapMs*sampleRate/1000))throw new MeasuredPacingError('Measured narration is too short for this duration without long silent holds. Expand and approve a new plan.');
   const samples = new Float32Array(Math.ceil(durationInFrames * sampleRate / fps)), cues: SelectedCue[] = [];
   let cursor = intro;
   for (const clip of ordered) {
@@ -42,7 +50,8 @@ export function assembleSelected(raw: unknown, expectedHash: string, clips: Sele
     cues.push({segmentId: clip.segmentId, sceneId: scene.sceneId, text: clip.text, sampleStart, sampleEnd,
       startFrame: Math.round(sampleStart * fps / sampleRate), speechEndFrame: Math.round(sampleEnd * fps / sampleRate), endFrame: Math.round(cursor * fps / sampleRate)});
   }
-  return {plan, audio: {samples, sampleRate} satisfies Audio, cues, durationInFrames, sourceMode: mode, timingPrecision: 'measured-phrase-only' as const};
+  return {plan, audio: {samples, sampleRate} satisfies Audio, cues, durationInFrames, sourceMode: mode, timingPrecision: 'measured-phrase-only' as const,
+    pacing:{policy:live?livePacingPolicy.version:'diagnostic-target-fill-v1',spokenSeconds:spoken/sampleRate,scenePauseSeconds:gap/sampleRate,addedPauseSeconds:ordered.length*gap/sampleRate,minimumSeconds:lowerSeconds}};
 }
 
 export function selectedSrt(cues: SelectedCue[], fps = 30) {

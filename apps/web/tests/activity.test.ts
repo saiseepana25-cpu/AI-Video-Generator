@@ -19,6 +19,7 @@ test('read acknowledgement is a bounded explicit sequence, not arbitrary member 
 });
 test('recovery messages never echo unknown provider diagnostics or offer blind retries',()=>{
   assert.match(recoveryMessage('generation','NARRATION_DURATION_EXCEEDED'),/new plan version/);
+  assert.match(recoveryMessage('generation','NARRATION_TOO_SHORT'),/Expand the plan/);
   assert.match(recoveryMessage('generation','TEXT_LAYOUT_EXCEEDED'),/Shorten narration/);
   assert.match(recoveryMessage('generation','LAYOUT_CHECK_UNAVAILABLE'),/No speech was requested/);
   assert.match(recoveryMessage('generation','SPEECH_OUTCOME_UNKNOWN'),/do not repeat/i);

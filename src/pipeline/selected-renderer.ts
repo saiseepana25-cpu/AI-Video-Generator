@@ -53,7 +53,7 @@ export async function renderSelectedVideo(options: {root: string; outputRoot: st
   await fs.writeFile(path.join(folder, 'input.json'), canonicalJson(timeline.plan));
   const manifest: Record<string, unknown> = {schemaVersion: 1, state: 'rendering', inputHash: options.expectedHash, rendererBuildHash, audioHash, language: timeline.plan.language,
     mode: options.mode, voicePinSatisfied: options.mode === 'elevenlabs-evaluation', timingPrecision: timeline.timingPrecision, publicationAllowed: false,
-    durationInFrames: timeline.durationInFrames, fps: 30, diagnostic: options.mode === 'offline-diagnostic', media: null};
+    durationInFrames: timeline.durationInFrames, fps: 30, diagnostic: options.mode === 'offline-diagnostic', pacing:timeline.pacing, media: null};
   const saveManifest = () => fs.writeFile(path.join(folder, 'manifest.json'), JSON.stringify(manifest, null, 2));
   await saveManifest(); let browser: Awaited<ReturnType<typeof openBrowser>> | undefined, stage = 'bundle';
   try {

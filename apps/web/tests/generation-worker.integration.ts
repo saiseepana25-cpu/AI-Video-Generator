@@ -347,6 +347,13 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     await approveRevision();
     assert.deepEqual((await new OperationsService(client,name,context,providerEnv).read()).recovery.items,[]);
   });
+  test('short narration keeps settled speech and requires an expanded approved version without retrying',async()=>{
+    await approve();engine.duringRender=async()=>{throw new GenerationFault('NARRATION_TOO_SHORT');};await worker.tick();
+    const failed=(await run())!;assert.equal(failed.error?.code,'NARRATION_TOO_SHORT');assert.equal(failed.error!.retryable,false);assert.ok(failed.error!.message.length<=240);assert.match(failed.error!.message,/Expand the plan/);
+    assert.equal(failed.stage,'rendering');assert.deepEqual((await service.job(failed.jobId))!.error,failed.error);assert.equal((await provider())!.reservations[0].state,'settled');assert.equal(await db.collection('generation_speech_attempts').countDocuments({state:'settled'}),3);assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);
+    const recovery=await new OperationsService(client,name,context,providerEnv).read();assert.match(recovery.recovery.items[0].message,/too short/);
+    await approve();await worker.tick();assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);assert.equal(await db.collection('generation_runs').countDocuments(),1);
+  });
   test('a replacement recovers a submitted expired lease as uncertain and fences the old owner', async () => {
     await approve(); const started = deferred<void>(), release = deferred<MeasuredSpeech>(); engine.duringSpeech = async () => {started.resolve(); return release.promise;};
     const old = worker.tick(); await started.promise;

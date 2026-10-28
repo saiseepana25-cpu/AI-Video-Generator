@@ -1,5 +1,11 @@
 # VideoCraft — V1 System Design
 
+## Bounded live narration pacing (28 October 2026)
+
+The selected-language live assembler no longer stretches short narration to the target with unlimited scene silence. With 350 ms intro/550 ms outro, exact measured clip samples and a 120 ms minimum gap, it inserts only enough uniform hold to reach the duration window's lower bound (30, 57 or 87 seconds). A hold exceeding two seconds refuses with a new-plan correction. Audio already inside the window keeps minimum gaps; the upper bounds stay 33/63/90 seconds. Frame rounding uses authoritative sample counts, and captions/diagram anchors follow the same recalculated phrase windows. No source samples are removed, repeated, stretched or accelerated. The policy bounds silence inserted by assembly, not pauses already present within provider audio.
+
+The new worker capability and renderer build protect new approvals from old pacing code. Short-audio refusal preserves used speech and previous ready outputs; it is never an automatic provider retry. A fuller script/more appropriate scene plan or shorter supported target may be needed, still subject to the existing two-line font/layout constraints and exact approval. Timing-unit tests do not certify that every real script/voice will fit every duration. Explicit offline diagnostic output retains old target-fill behavior solely for layout inspection, remains visibly diagnostic/non-ready and does not prove live pacing quality. Subjective pacing/pronunciation and new live-video listening remain acceptance tasks after a separately reviewed approval.
+
 ## Local generation process resilience increment (28 October 2026)
 
 The operator-local generation process now distinguishes retryable idle MongoDB polling from unresolved execution failures. Allowlisted pre-execution failures receive three interruptible 2/4/8-second retries; successful polling resets the budget. Startup/readiness/configuration and unhandled execution errors stop with fixed safe reason codes. Handled terminal generation failures still close only that run through existing rules. The runner never retries a speech POST, re-approves a plan, clears uncertainty or restarts a physical render. This is bounded local resilience, not an always-on host/supervisor or a guarantee that the historical worker exit had the same cause.

@@ -1,5 +1,11 @@
 # VideoCraft — V1 Database Design
 
+## Bounded live pacing refinement (28 October 2026)
+
+No schema, migration, index or immutable-input rewrite. Admission/claim now require `timing:bounded-holds-v1` in the existing worker capability list; changed timing/renderer source participates in build identity. Actual live assembly keeps approved PCM samples/text intact and bounds inserted scene holds to two seconds while using 30–33/57–63/87–90-second output windows. A short-plan refusal occurs before local renderer output files/browser work and persists the existing terminal `failed` job shape with bounded `NARRATION_TOO_SHORT`, retryable false. The worker's existing rendering-stage/finalization fences still apply; refusal is not a new executor recovery mechanism.
+
+Settled attempts and reuse references remain retained. Newly consumed speech keeps conservative settled accounting; a fully reused run releases only its own unused hold under existing rules. No artifact/ready record is fabricated, no older ready pointer is cleared, and replay of that exact approval returns its failed run rather than dispatching again. A revised plan/settings version and explicit approval are required. New completed local manifests optionally include `pacing:{policy,spokenSeconds,scenePauseSeconds,addedPauseSeconds,minimumSeconds}`; the existing completed-manifest SHA256 transitively pins this summary and MP4. Legacy manifests remain supported under their original hashes; no existing ready-media timing changes.
+
 ## Generation worker polling and shutdown refinement (28 October 2026)
 
 No migration or validator/index change. Registry heartbeat first reads the singleton and conditionally writes its observed BSON Long revision, owner/expiry and non-disabled state; one fresh-read retry permits ordinary revision contention. Initial creation remains a unique singleton upsert. Stop/release increments the existing revision; release permanently stops that worker instance. A late heartbeat prepared against an earlier revision cannot renew ownership after release/replacement/disablement. Registry read/update, active lease heartbeat and stop/release have five-second driver deadlines; a client deadline is not evidence that a server write or physical executor stopped, so revision/owner/epoch fences remain mandatory.
