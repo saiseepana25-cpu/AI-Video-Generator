@@ -1,5 +1,11 @@
 # VideoCraft — V1 System Design
 
+## Local generation process resilience increment (28 October 2026)
+
+The operator-local generation process now distinguishes retryable idle MongoDB polling from unresolved execution failures. Allowlisted pre-execution failures receive three interruptible 2/4/8-second retries; successful polling resets the budget. Startup/readiness/configuration and unhandled execution errors stop with fixed safe reason codes. Handled terminal generation failures still close only that run through existing rules. The runner never retries a speech POST, re-approves a plan, clears uncertainty or restarts a physical render. This is bounded local resilience, not an always-on host/supervisor or a guarantee that the historical worker exit had the same cause.
+
+SIGINT/SIGTERM wakes backoff immediately and calls the existing stop/abort path. Active heartbeat work is tracked and joined before final release; pending stop writes and client cleanup cannot overwrite the primary failure. Five-second driver deadlines prevent unbounded heartbeat/shutdown network waits, while registry revision CAS prevents a timed-out late heartbeat from refreshing released ownership. The rendering-stage termination-evidence rule remains unchanged. Fixed structured diagnostics describe idle retries/recovery/exhaustion, release/signal cleanup failure and the terminal reason without raw exception content. Pacing and execution-host supervision remain separate work.
+
 ## Pre-speech actual-font layout check (28 October 2026)
 
 The operator-local renderer now checks approved text with the installed SHA256-pinned fonts before requesting or reusing narration. A separate trusted metadata-only Remotion composition measures spatial layout with the same shared font/canvas/wrapping/glyph-height code as final rendering, without cues, speech duration estimates, audio or rendered frames. Per-check assets live in unique ignored `.cache/layout-preflight` folders; their cleanup remains the existing unfinished scratch-lifecycle work. No user text is truncated, rewritten or silently split. Abort closes the owned browser before returning; missing assets/browser/measurement stop execution rather than permit speech. The worker requires the new capability and matching renderer build; preflight code/font dependencies participate in build identity.

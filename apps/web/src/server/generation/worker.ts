@@ -13,6 +13,7 @@ import {requiredCapabilities, type Approval, type GenerationRun, type Generation
 import {GenerationFault, type GenerationEngine, type SpeechClip} from './engine';
 import {closeGenerationReservation} from './reservation';
 import {trySpeechReuse} from './speech-reuse';
+import {idleDatabaseFailure} from './poll-error';
 
 const activeStates = ['running', 'cancellation_requested'] as const;
 const safeError = (code: string) => ({code, retryable: false as const, message: code === 'TEXT_LAYOUT_EXCEEDED' ? 'Text does not fit the readable video layout. Shorten narration, headings or diagram labels, save and check a new plan version, then approve it. No automatic retry.' : code === 'LAYOUT_CHECK_UNAVAILABLE' ? 'The font/layout check could not finish. No speech was requested. Ask the operator to verify local fonts and the browser before reviewing a new version.' : code === 'NARRATION_DURATION_EXCEEDED' ? 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.' : code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
@@ -24,17 +25,26 @@ export class GenerationWorker {
   constructor(private client: MongoClient, private name: string, private env: Env, private engine: GenerationEngine) {}
   private get db() {return this.client.db(this.name);}
   async heartbeat() {
-    const spec = await this.engine.inspect(), now = new Date();
+    if(this.stopping)return false;
+    const spec = await this.engine.inspect();
     if (!requiredCapabilities.every(c => this.engine.capabilities.includes(c))) throw new GenerationFault('ENGINE_NOT_CAPABLE');
-    try {
-      const result = await this.db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local', state: {$ne: 'disabled'}, $or: [{owner: this.owner}, {expiresAt: {$lte: now}}]},
-        {$set: {owner: this.owner, state: this.stopping ? 'draining' : 'healthy', contract: RENDER_CONTRACT, compilerVersion: 'staged-diagrams-compiler-v1',
-          rendererBuildHash: spec.rendererBuildHash, fonts: spec.fonts, capabilities: this.engine.capabilities, heartbeatAt: now, expiresAt: new Date(now.getTime() + 45000)}, $inc: {revision: Long.ONE}}, {upsert: true});
-      return !!(result.matchedCount || result.upsertedCount);
-    } catch (error) {if (error && typeof error === 'object' && 'code' in error && error.code === 11000) return false; throw error;}
+    const registry=this.db.collection<WorkerRow>('generation_workers');
+    // A delayed/ambiguous heartbeat cannot match the revision written by release.
+    // Retry one ordinary admission/heartbeat CAS race, never a provider operation.
+    for(let attempt=0;attempt<2;attempt++) {
+      const previous=await registry.findOne({_id:'generation:local'},{timeoutMS:5000}),now=new Date();
+      if(this.stopping||previous?.state==='disabled'||previous&&previous.owner!==this.owner&&previous.expiresAt>now)return false;
+      try {
+        const result=await registry.updateOne({_id:'generation:local',revision:previous?.revision??{$exists:false},state:{$ne:'disabled'},$or:[{owner:this.owner},{expiresAt:{$lte:now}}]},
+          {$set:{owner:this.owner,state:'healthy',contract:RENDER_CONTRACT,compilerVersion:'staged-diagrams-compiler-v1',rendererBuildHash:spec.rendererBuildHash,fonts:spec.fonts,capabilities:this.engine.capabilities,heartbeatAt:now,expiresAt:new Date(now.getTime()+45000)},$inc:{revision:Long.ONE}},
+          {upsert:!previous,timeoutMS:5000});
+        if(result.matchedCount||result.upsertedCount)return true;
+      }catch(error){if(error&&typeof error==='object'&&'code'in error&&error.code===11000)return false;throw error;}
+    }
+    return false;
   }
-  async stop() {this.stopping = true; this.controller?.abort(); await this.db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local', owner: this.owner, state: 'healthy'}, {$set: {state: 'draining'}, $inc: {revision: Long.ONE}});}
-  async release() {await this.db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local', owner: this.owner, state: {$ne: 'disabled'}}, {$set: {state: 'draining', expiresAt: new Date(0)}, $inc: {revision: Long.ONE}});}
+  async stop() {this.stopping = true; this.controller?.abort(); await this.db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local', owner: this.owner, state: 'healthy'}, {$set: {state: 'draining'}, $inc: {revision: Long.ONE}},{timeoutMS:5000});}
+  async release() {this.stopping=true;this.controller?.abort();await this.db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local', owner: this.owner, state: {$ne: 'disabled'}}, {$set: {state: 'draining', expiresAt: new Date(0)}, $inc: {revision: Long.ONE}},{timeoutMS:5000});}
   private async slot(db: Db, session: ClientSession) {
     const result = await db.collection<WorkerRow>('generation_workers').findOneAndUpdate({_id: 'generation:local', owner: this.owner, state: {$in: ['healthy', 'draining']}, expiresAt: {$gt: new Date()}}, {$inc: {revision: Long.ONE}}, {session, returnDocument: 'after'});
     if (!result) throw new GenerationFault('WORKER_OWNERSHIP_LOST'); return result;
@@ -137,16 +147,20 @@ export class GenerationWorker {
   async tick() {
     if (this.busy || this.stopping) return false; this.busy = true;
     try {
-      if (!await this.heartbeat()) return false; await this.recoverExpired();
-      const claimed = await this.claim(); if (!claimed) return false;
-      const {run, plan} = claimed, controller = new AbortController(); this.controller = controller; let heartbeatBusy = false;
+      let claimed: Awaited<ReturnType<GenerationWorker['claim']>>;
+      try {
+        if (!await this.heartbeat()) return false; await this.recoverExpired();
+        claimed = await this.claim();
+      } catch(error) {throw idleDatabaseFailure(error) ?? error;}
+      if (!claimed) return false;
+      const {run, plan} = claimed, controller = new AbortController(); this.controller = controller; let heartbeatTask:Promise<void>|null=null;
       const timer = setInterval(() => {
-        if (heartbeatBusy) return; heartbeatBusy = true;
-        void (async () => {
+        if (heartbeatTask) return;
+        heartbeatTask = (async () => {
           if (!await this.heartbeat()) {controller.abort(); return;}
-          const result = await this.db.collection<GenerationRun>('generation_runs').findOneAndUpdate({_id: run._id, owner: this.owner, leaseEpoch: run.leaseEpoch, state: {$in: activeStates}, leaseUntil: {$gt: new Date()}}, {$set: {leaseUntil: new Date(Date.now() + 90000)}}, {returnDocument: 'after'});
+          const result = await this.db.collection<GenerationRun>('generation_runs').findOneAndUpdate({_id: run._id, owner: this.owner, leaseEpoch: run.leaseEpoch, state: {$in: activeStates}, leaseUntil: {$gt: new Date()}}, {$set: {leaseUntil: new Date(Date.now() + 90000)}}, {returnDocument: 'after',timeoutMS:5000});
           if (!result || result.state === 'cancellation_requested') controller.abort();
-        })().catch(() => controller.abort()).finally(() => {heartbeatBusy = false;});
+        })().catch(() => controller.abort()).finally(() => {heartbeatTask = null;});
       }, 10000);
       try {
         const logoObject=await this.approvedLogo(run,plan);let logo:Buffer|undefined;
@@ -189,7 +203,7 @@ export class GenerationWorker {
           const current = await this.owned(db, session, run, true);
           await this.finishWithin(db, session, current, error instanceof GenerationFault ? error.code : 'GENERATION_INTERRUPTED');
         });} catch (finishError) {if (!(finishError instanceof GenerationFault && finishError.code === 'WORKER_OWNERSHIP_LOST')) throw finishError;}
-      } finally {clearInterval(timer); controller.abort(); this.controller = null;}
+      } finally {clearInterval(timer); controller.abort(); await heartbeatTask; this.controller = null;}
       return true;
     } finally {this.busy = false;}
   }

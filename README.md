@@ -1,5 +1,11 @@
 # VideoCraft
 
+## Local generation worker recovery
+
+Run `npm run web:generation -- worker` when ready to process already approved work. Temporary idle database failures now get three retries after 2, 4 and 8 seconds; persistent failure stops. Logs use safe structured reason codes. This does not retry a video, speech request, approval or uncertain outcome. Startup/readiness/configuration errors and unresolved failures after claim still stop; inspect retained job/provider status before restarting. Do not clear a rendering lease merely because it expired.
+
+Ctrl+C interrupts polling/backoff and waits for owned processing/heartbeat cleanup. Registry writes use revision fences and bounded driver deadlines; a delayed heartbeat cannot revive a released worker. A stopped instance cannot start polling again. This local loop does not replace deployment supervision, prove the cause of the earlier worker exit or change video pacing. Existing R2 videos remain usable with the generation worker stopped.
+
 ## Pre-speech layout safety
 
 The local generation worker measures approved caption/heading/diagram text using pinned fonts before any speech request or reuse. Overflow fails with `TEXT_LAYOUT_EXCEEDED`; unavailable fonts/browser fail with `LAYOUT_CHECK_UNAVAILABLE`. Review, shorten and save/check a new plan version before approving another attempt. Static dashboard checks do not start Chrome or guarantee measured duration. Restart an old generation worker after updating code; admission requires `layout:font-measured-v1` and the current renderer build. Existing stored videos keep their original identity and remain playable.

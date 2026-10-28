@@ -10,7 +10,9 @@ import {brandLogoCapability,brandPaletteCapability} from '../src/server/generati
 import {after, before, beforeEach, describe, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {Long, MongoClient, type Db} from 'mongodb';
+import {Long, MongoClient, MongoNetworkError, MongoServerError, type Db} from 'mongodb';
+import {runGenerationWorker,type GenerationLoopEvent} from '../src/server/generation/loop';
+import {GenerationIdlePollError} from '../src/server/generation/poll-error';
 import {databaseClientOptions} from '../src/server/db/connection';
 import {checkDatabase, migrateDatabase} from '../src/server/db/migrations';
 import {GenerationService} from '../src/server/generation/service';
@@ -134,6 +136,46 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     assert.equal((await provider())!.reservations[0].state, 'settled'); assert.ok((await provider())!.reservations[0].units > 0);
     assert.equal((await db.collection<Row>('projects').findOne({_id: projectId}))!.latestRunId, null);
     const view = await service.job(accepted.job.jobId); assert.equal(view!.result, null); assert.equal(JSON.stringify(view).includes('localArtifact'), false); assert.equal(view!.allowedActions.length, 0); await checkDatabase(db);
+  });
+  test('an idle heartbeat outage is retried without speech before the approved run completes',async()=>{
+    await approve();const stop=new AbortController(),events:GenerationLoopEvent[]=[];let calls=0;
+    const heartbeat=worker.heartbeat.bind(worker);worker.heartbeat=async()=>{if(++calls===1)throw new MongoNetworkError('private database address');return heartbeat();};
+    engine.duringRender=async()=>{stop.abort();};
+    await runGenerationWorker(worker,{signal:stop.signal,report:e=>events.push(e),sleep:async()=>{assert.equal(engine.speechCalls,0);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);}});
+    assert.equal((await run())!.state,'rendered_local');assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);
+    assert.equal(events[0].event,'generation_idle_retry');assert.equal(events[1].event,'generation_idle_recovered');
+    const slot=(await db.collection<WorkerRow>('generation_workers').findOne({_id:'generation:local'}))!;assert.equal(slot.state,'draining');assert.equal(slot.expiresAt.getTime(),0);
+  });
+  test('an unresolved post-claim database failure is not treated as idle or dispatched again',async()=>{
+    await approve();const collection=db.collection('generation_runs'),validator=(await collection.options()).validator;
+    await db.command({collMod:'generation_runs',validator:{$and:[validator,{state:{$nin:['failed','cancelled','rendered_local']}}]}});
+    try {
+      const events:GenerationLoopEvent[]=[];
+      await assert.rejects(runGenerationWorker(worker,{signal:new AbortController().signal,report:e=>events.push(e),sleep:async()=>assert.fail('post-claim failures must stop')}),e=>e instanceof MongoServerError&&!(e instanceof GenerationIdlePollError));
+      assert.deepEqual(events,[]);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,1);assert.equal((await run())!.state,'running');assert.equal((await run())!.stage,'rendering');
+      assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);assert.equal(await db.collection('generation_runs').countDocuments(),1);
+    } finally {await db.command({collMod:'generation_runs',validator});}
+  });
+  test('released ownership cannot be refreshed by a stale registry revision or a later heartbeat',async()=>{
+    const registry=db.collection<WorkerRow>('generation_workers'),before=(await registry.findOne({_id:'generation:local'}))!;
+    await worker.release();const released=(await registry.findOne({_id:'generation:local'}))!;
+    const delayed=await registry.updateOne({_id:'generation:local',owner:worker.owner,revision:before.revision},{$set:{state:'healthy',expiresAt:new Date(Date.now()+45000)},$inc:{revision:Long.ONE}});
+    assert.equal(delayed.matchedCount,0);assert.equal(await worker.heartbeat(),false);assert.equal(await worker.tick(),false);
+    assert.deepEqual(await registry.findOne({_id:'generation:local'}),released);
+  });
+  test('shutdown joins an in-flight heartbeat before releasing the registry slot',{timeout:25000},async()=>{
+    await approve();const heartbeatStarted=deferred<void>(),allowHeartbeat=deferred<void>(),renderStarted=deferred<void>(),allowRender=deferred<void>();
+    const stop=new AbortController(),heartbeat=worker.heartbeat.bind(worker);let heartbeatCalls=0,finished=false;
+    worker.heartbeat=async()=>{if(++heartbeatCalls===2){heartbeatStarted.resolve();await allowHeartbeat.promise;}return heartbeat();};
+    engine.duringRender=async()=>{renderStarted.resolve();await allowRender.promise;};
+    const running=runGenerationWorker(worker,{signal:stop.signal,report:()=>{}}).then(()=>{finished=true;});
+    try {
+      await renderStarted.promise;await heartbeatStarted.promise;stop.abort();allowRender.resolve();
+      const deadline=Date.now()+5000;while((await run())!.state!=='rendered_local'&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));
+      assert.equal((await run())!.state,'rendered_local');assert.equal(finished,false);
+      allowHeartbeat.resolve();await running;
+      const slot=(await db.collection<WorkerRow>('generation_workers').findOne({_id:'generation:local'}))!;assert.equal(slot.state,'draining');assert.equal(slot.expiresAt.getTime(),0);
+    } finally {allowRender.resolve();allowHeartbeat.resolve();await running;}
   });
   test('verified speech reuse avoids all new submissions for a visual-only revision and refunds its unused hold',async()=>{
     await approve();await worker.tick();const first=(await run())!,remaining=(await provider())!.allowance.observedRemaining;
