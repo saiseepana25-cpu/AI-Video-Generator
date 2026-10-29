@@ -19,6 +19,12 @@ import {GenerationService} from '../src/server/generation/service';
 import {GenerationWorker} from '../src/server/generation/worker';
 import {OperationsService} from '../src/server/activity/operations';
 import {GenerationFault, type GenerationEngine, type MeasuredSpeech} from '../src/server/generation/engine';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {DatabaseExecutor,type ExecutorHost} from '../src/server/generation/executor-service';
+import type {Execution} from '../src/server/generation/executor-contracts';
+import {executorCollections} from '../src/server/db/executor-schemas';
+import {selectedFontAssets,selectedRendererBuildHash} from '../../../src/pipeline/selected-renderer';
 import {requiredCapabilities, type GenerationRun, type SpeechAttempt, type GenerationWorker as WorkerRow} from '../src/server/generation/contracts';
 import type {PlanVersion} from '../src/server/planning/contracts';
 import type {ProviderControl} from '../src/server/providers/contracts';
@@ -73,7 +79,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['source_purge_receipts','speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['generation_executors','source_purge_receipts','speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -97,6 +103,79 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     return (await db.collection<GenerationRun>('generation_runs').findOne({_id:result.job.generationRunId}))!;
   }
   async function cancelCurrent() {const current = (await run())!; return service.cancel(current.jobId, {expectedRevision: current.statusRevision.toNumber()}, randomUUID());}
+
+  async function executorFixture(){
+    const root=path.resolve(process.cwd(),'../..','.cache','executor-db-test',randomUUID());await fs.mkdir(root,{recursive:true});
+    const stop=deferred<number>();let active=false,admissions=0,allowProof=true,onPrepared:undefined|(()=>Promise<void>);
+    const host:ExecutorHost={start(identity){active=true;return {
+      prepared:(async()=>{await onPrepared?.();})(),stopped:stop.promise,
+      admit(){admissions++;void(async()=>{
+        const row=(await db.collection<Execution>('generation_executors').findOne({jobName:identity.jobName}))!;assert.equal(row.state,'running');
+        const result={rendererBuildHash:row.rendererBuildHash,folder:row.artifactId?path.join(root,'output','dashboard-renders',row.runId,row.artifactId):undefined,manifestHash:'f'.repeat(64),media:{width:1080,height:1920,videoCodec:'h264',audioCodec:'aac',durationSeconds:30.016,audioSampleRate:48000,meanVolumeDb:-20}};
+        await fs.writeFile(path.join(root,'.cache','executors',identity.id,'result.json'),JSON.stringify({ok:true,result}));active=false;stop.resolve(0);
+      })().catch(()=>{active=false;stop.resolve(1);});},cancel(){if(allowProof){active=false;stop.resolve(130);}}
+    };},async inspect(_identity,terminate){if(!allowProof)throw new Error('OS uncertainty');if(terminate)active=false;return !active;}};
+    return {root,host,stop,get admissions(){return admissions;},set allowProof(v:boolean){allowProof=v;},set onPrepared(fn:(()=>Promise<void>)|undefined){onPrepared=fn;},service:new DatabaseExecutor(client,name,root,worker.owner,host)};
+  }
+  test('durable executor admission precedes physical go and successful stop is scoped permanently',async()=>{
+    await approve();const fixture=await executorFixture();
+    engine.duringPreflight=async signal=>{const r=(await run())!;await fixture.service.execute(r._id,'preflight',{hash:r.inputHash},signal);};
+    await worker.tick();assert.equal(fixture.admissions,1);const receipt=(await db.collection<Execution>('generation_executors').findOne({}))!;
+    assert.equal(receipt.state,'stopped');assert.equal(receipt.exitCode,0);assert.equal(receipt.stopReason,'completed');assert.equal(receipt.owner,worker.owner);assert.equal((await run())!.state,'rendered_local');await checkDatabase(db);
+  });
+  test('cancellation while the executor is suspended refuses physical admission and records stop',async()=>{
+    await approve();const fixture=await executorFixture();fixture.onPrepared=async()=>{await cancelCurrent();};
+    engine.duringPreflight=async signal=>{const r=(await run())!;await fixture.service.execute(r._id,'preflight',{hash:r.inputHash},signal);};
+    await worker.tick();assert.equal(fixture.admissions,0);assert.equal((await run())!.state,'cancelled');assert.equal((await db.collection<Execution>('generation_executors').findOne({}))!.state,'stopped');assert.equal(engine.speechCalls,0);
+  });
+  test('expired physical executor recovery requires an OS stop proof before terminalizing the run',async()=>{
+    await approve();const fixture=await executorFixture();fixture.allowProof=false;
+    engine.duringPreflight=async signal=>{const r=(await run())!;fixture.onPrepared=async()=>{throw new Error('transport lost');};await fixture.service.execute(r._id,'preflight',{hash:r.inputHash},signal);};
+    await assert.rejects(worker.tick(),{code:'EXECUTOR_STOP_UNCONFIRMED'});const retained=(await run())!;
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:retained._id},{$set:{leaseUntil:new Date(0)}});await worker.release();
+    let recovery!:DatabaseExecutor;
+    const replacementEngine=Object.assign(new FakeEngine(),{recoverExecutors:(id:string):Promise<boolean>=>recovery.recover(id)});
+    const replacement=new GenerationWorker(client,name,providerEnv,replacementEngine);recovery=new DatabaseExecutor(client,name,fixture.root,replacement.owner,fixture.host);
+    await replacement.heartbeat();await assert.rejects(replacement.recoverExpired(),{code:'EXECUTOR_STOP_UNCONFIRMED'});assert.equal((await run())!.state,'running');
+    fixture.allowProof=true;assert.equal(await replacement.recoverExpired(),1);assert.equal((await run())!.state,'failed');assert.equal((await db.collection<Execution>('generation_executors').findOne({}))!.stopReason,'recovered');assert.equal((await provider())!.reservations.length,0);assert.equal(replacementEngine.speechCalls,0);
+  });
+  test('foreign-host executor receipts refuse recovery without terminalizing or clearing accounting',async()=>{
+    await approve();const fixture=await executorFixture();fixture.allowProof=false;fixture.onPrepared=async()=>{throw new Error('transport lost');};
+    engine.duringPreflight=async signal=>{const r=(await run())!;await fixture.service.execute(r._id,'preflight',{hash:r.inputHash},signal);};
+    await assert.rejects(worker.tick());const retained=(await run())!;await db.collection<GenerationRun>('generation_runs').updateOne({_id:retained._id},{$set:{leaseUntil:new Date(0)}});
+    await db.collection<Execution>('generation_executors').updateOne({runId:retained._id},{$set:{hostHash:'a'.repeat(64)}});
+    await assert.rejects(fixture.service.recover(retained._id),{code:'EXECUTOR_STOP_UNCONFIRMED'});assert.equal((await run())!.state,'running');assert.equal((await provider())!.reservations[0].state,'reserved');
+  });
+  test('failed stop-receipt write retains the run until a later OS-proof recovery commits',async()=>{
+    await approve();const fixture=await executorFixture();
+    await db.command({collMod:'generation_executors',validator:{$and:[executorCollections[0].validator,{state:{$ne:'stopped'}}]}});
+    engine.duringPreflight=async signal=>{const r=(await run())!;await fixture.service.execute(r._id,'preflight',{hash:r.inputHash},signal);};
+    try{await assert.rejects(worker.tick(),{code:'EXECUTOR_STOP_UNCONFIRMED'});}finally{await db.command({collMod:'generation_executors',validator:executorCollections[0].validator});}
+    const retained=(await run())!;assert.equal(retained.state,'running');assert.equal(fixture.admissions,1);
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:retained._id},{$set:{leaseUntil:new Date(0)}});await worker.release();
+    let recovery!:DatabaseExecutor;const e=Object.assign(new FakeEngine(),{recoverExecutors:(id:string):Promise<boolean>=>recovery.recover(id)}),w=new GenerationWorker(client,name,providerEnv,e);
+    recovery=new DatabaseExecutor(client,name,fixture.root,w.owner,fixture.host);await w.heartbeat();assert.equal(await w.recoverExpired(),1);assert.equal((await run())!.state,'failed');assert.equal(fixture.admissions,1);
+  });
+  test('persisted supervised protocol fences recovery before any executor admission without applying to legacy renders',async()=>{
+    Object.assign(engine,{executionProtocol:'windows-job-v1'});await approve();const started=deferred<void>(),release=deferred<void>();
+    engine.duringPreflight=async()=>{started.resolve();await release.promise;};const old=worker.tick();await started.promise;
+    const current=(await run())!;assert.equal(current.executorProtocol,'windows-job-v1');assert.equal(await db.collection('generation_executors').countDocuments(),0);
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:current._id},{$set:{leaseUntil:new Date(0)}});await db.collection<WorkerRow>('generation_workers').updateOne({_id:'generation:local'},{$set:{expiresAt:new Date(0)}});
+    const replacement=new GenerationWorker(client,name,providerEnv,new FakeEngine());await replacement.heartbeat();assert.equal(await replacement.recoverExpired(),1);
+    release.resolve();await old;assert.equal((await run())!.state,'failed');assert.equal(engine.speechCalls,0);assert.equal(engine.renderCalls,0);assert.equal((await provider())!.reservations.length,0);
+  });
+  test('actual Windows Job font preflight composes with durable database admission without provider requests',{skip:process.platform!=='win32'},async()=>{
+    const root=path.resolve(process.cwd(),'../..'),{pins:actual}=await selectedFontAssets(root),build=await selectedRendererBuildHash(root,actual);
+    engine.build=build;engine.inspect=async()=>({rendererBuildHash:build,fonts:actual});await worker.heartbeat();
+    const p=(await db.collection<Row>('projects').findOne({_id:projectId}))!,plan=buildRenderPlan(renderFixture().proposal,p.brief,p.settings,actual);
+    const liveService=new GenerationService(client,name,context,providerEnv,async()=>actual);
+    await liveService.approve(projectId,{expectedProjectRevision:1,planVersionId:planId,generationInputHash:generationHash(plan)},randomUUID());
+    const executor=new DatabaseExecutor(client,name,root,worker.owner);
+    engine.duringPreflight=async signal=>{const r=(await run())!;await executor.execute(r._id,'preflight',{plan,hash:r.inputHash},signal);};
+    await worker.tick();const receipt=(await db.collection<Execution>('generation_executors').findOne({}))!;
+    assert.equal(receipt.state,'stopped');assert.equal(receipt.exitCode,0);assert.equal(receipt.rendererBuildHash,build);assert.equal((await run())!.state,'rendered_local');
+    // Speech/render after preflight are FakeEngine-only; no external API is called.
+  });
 
   async function logoPlan(){
     const png=await sharp({create:{width:160,height:80,channels:4,background:{r:10,g:20,b:30,alpha:1}}}).png().toBuffer(),objects=new Map<string,Buffer>();

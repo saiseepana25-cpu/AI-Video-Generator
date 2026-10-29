@@ -14,6 +14,7 @@ import {GenerationFault, type GenerationEngine, type SpeechClip} from './engine'
 import {closeGenerationReservation} from './reservation';
 import {trySpeechReuse} from './speech-reuse';
 import {idleDatabaseFailure} from './poll-error';
+import {executorStopEvidence} from './executor-contracts';
 
 const activeStates = ['running', 'cancellation_requested'] as const;
 const safeError = (code: string) => ({code, retryable: false as const, message: code === 'NARRATION_TOO_SHORT' ? 'Narration is too short for this duration without long pauses. Expand the plan or choose a shorter supported target, save/check a new version, then approve it. Used speech is retained; no automatic retry.' : code === 'TEXT_LAYOUT_EXCEEDED' ? 'Text does not fit the readable video layout. Shorten narration, headings or diagram labels, save and check a new plan version, then approve it. No automatic retry.' : code === 'LAYOUT_CHECK_UNAVAILABLE' ? 'The font/layout check could not finish. No speech was requested. Ask the operator to verify local fonts and the browser before reviewing a new version.' : code === 'NARRATION_DURATION_EXCEEDED' ? 'Generated narration is too long for the selected duration. Shorten it, save a new plan version, check and approve it before generating again. Existing speech may have used free allowance. No automatic retry.' : code === 'SPEECH_OUTCOME_UNKNOWN' ? 'Speech usage is uncertain. Further speech requests are paused for operator review.' : code === 'CANCELLED' ? 'Generation stopped. A submitted speech request may still consume free allowance.' : 'Video generation did not finish. Review the saved plan and provider/worker status before creating a new version.'});
@@ -85,16 +86,21 @@ export class GenerationWorker {
       actionNeeded: false, safeActionRoute: `/projects/${run.projectId}`, createdAt: now}, {session});
   }
   async recoverExpired() {
+    // Physical termination runs outside MongoDB transactions. Each receipt is
+    // admitted/fenced durably; final recovery rechecks expiry and stop evidence.
+    if(this.engine.recoverExecutors){
+      const physical=await this.db.collection<GenerationRun>('generation_runs').find({state:{$in:activeStates},leaseUntil:{$lte:new Date()},stage:{$in:['rendering','validating']}}).limit(20).toArray();
+      for(const run of physical)await this.engine.recoverExecutors(run._id);
+    }
     return databaseTransaction(this.client, this.name, async (db, session) => {
       await this.slot(db, session);
-      // Lease expiry fences DB writes, not Chrome/FFmpeg. This executor has no
-      // durable process-tree termination evidence, so keep possible renders
-      // active (including cancellation requests) and preserve the sole slot.
-      // Validation may still have FFmpeg children; files/abort/owner loss are
-      // not stop evidence. A future recovery path must verify termination first.
-      const expired = await db.collection<GenerationRun>('generation_runs').find({state: {$in: activeStates}, leaseUntil: {$lte: new Date()}, stage: {$nin: ['rendering', 'validating']}}, {session}).limit(20).toArray();
-      for (const run of expired) await this.finishWithin(db, session, run, 'WORKER_INTERRUPTED');
-      return expired.length;
+      // Lease expiry fences DB writes, not Chrome/FFmpeg. Only exact stopped
+      // executor receipts can release physical work. Legacy/unprovable renders
+      // remain active; no timestamp, abort or missing-file inference is allowed.
+      const expired = await db.collection<GenerationRun>('generation_runs').find({state: {$in: activeStates}, leaseUntil: {$lte: new Date()}}, {session}).limit(20).toArray();
+      let recovered=0;
+      for (const run of expired){if(['rendering','validating'].includes(run.stage??'')&&!await executorStopEvidence(db,session,run))continue;await this.finishWithin(db, session, run, 'WORKER_INTERRUPTED');recovered++;}
+      return recovered;
     });
   }
   private async claim() {
@@ -110,6 +116,7 @@ export class GenerationWorker {
         await this.finishWithin(db, session, run, 'APPROVAL_OR_WORKER_CHANGED'); return null;
       }
       const next: GenerationRun = {...run, state: 'running', owner: this.owner, leaseEpoch: (run.leaseEpoch ?? Long.ZERO).add(Long.ONE), leaseUntil: new Date(Date.now() + 90000),
+        ...(this.engine.executionProtocol?{executorProtocol:this.engine.executionProtocol}:{}),
         startedAt: new Date(), stage: 'plan_validation', submissionCount: 0, artifactId: null, error: null, statusRevision: run.statusRevision.add(Long.ONE), updatedAt: new Date()};
       await db.collection<GenerationRun>('generation_runs').replaceOne({_id: run._id, state: 'queued'}, next, {session}); return {run: next, plan};
     });
@@ -168,7 +175,7 @@ export class GenerationWorker {
         // Font preflight also owns Chrome. Lease expiry during that call cannot
         // prove process termination any more than expiry during video rendering.
         await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'validating', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});
-        const preflight = await this.engine.preflight(plan, run.inputHash, controller.signal);
+        const preflight = await this.engine.preflight(plan, run.inputHash, controller.signal,run._id);
         controller.signal.throwIfAborted();
         if (preflight.rendererBuildHash !== run.rendererBuildHash) throw new GenerationFault('RENDERER_CHANGED');
         await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'plan_validation', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});

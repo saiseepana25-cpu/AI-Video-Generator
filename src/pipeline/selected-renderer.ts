@@ -31,6 +31,7 @@ export async function selectedFontAssets(root: string) {
 export async function selectedRendererBuildHash(root: string, pins: FontPins) {
   const files = ['src/video/selected-index.tsx', 'src/video/SelectedDiagrams.tsx', 'src/video/selected-layout.ts', 'src/pipeline/selected-types.ts', 'src/pipeline/selected-renderer.ts', 'src/pipeline/selected-timing.ts', 'src/pipeline/probe.ts', 'src/pipeline/wav.ts', 'apps/web/src/server/rendering/contract.ts', 'apps/web/src/server/brand/palette.ts', 'src/pipeline/logo-bytes.ts','apps/web/src/server/logos/bytes.ts','apps/web/src/server/brand/logo.ts','package-lock.json'];
   files.push('src/video/selected-preflight-index.tsx', 'src/video/selected-font-layout.ts', 'src/pipeline/layout-preflight.ts', 'src/pipeline/executor-stop.ts');
+  files.push('src/pipeline/windows-job.ps1','src/pipeline/windows-executor.ts','scripts/render-executor.ts','src/pipeline/generation-engine.ts','apps/web/src/server/generation/executor-service.ts','apps/web/src/server/generation/executor-contracts.ts');
   const parts = await Promise.all(files.map(async file => ({file, sha256: sha(await fs.readFile(path.join(root, file)))})));
   return sha(canonicalJson({adapter: 'educational-diagrams-renderer-v1', pins, files: parts}));
 }
@@ -38,14 +39,16 @@ export async function selectedRendererBuildHash(root: string, pins: FontPins) {
 /** Root-only adapter. No MongoDB/env/provider access and no changes to the v1 renderer.
  * The caller supplies decoded clips, exact approval hash and a trusted output root.
  */
-export async function renderSelectedVideo(options: {root: string; outputRoot: string; plan: unknown; expectedHash: string; clips: SelectedClip[]; mode: SelectedVideoProps['mode']; licenseConfirmed: boolean; logoBytes?:Buffer; signal?: AbortSignal; onProgress?: (progress: number) => void}) {
+export async function renderSelectedVideo(options: {root: string; outputRoot: string; plan: unknown; expectedHash: string; clips: SelectedClip[]; mode: SelectedVideoProps['mode']; licenseConfirmed: boolean; logoBytes?:Buffer; signal?: AbortSignal; onProgress?: (progress: number) => void; artifactId?:string; scratchRoot?:string}) {
   if (!options.licenseConfirmed) throw new Error('Confirm Remotion free-license eligibility before rendering.');
   options.signal?.throwIfAborted();
   const timeline = assembleSelected(options.plan, options.expectedHash, options.clips, options.mode), {fonts, pins} = await selectedFontAssets(options.root);
   for (const font of timeline.plan.settingsSnapshot.brand.fonts) if (font.sha256 !== pins[font.role as keyof FontPins]) throw new Error('Installed font bytes do not match the reviewed input.');
   const logo=verifiedLogoBytes(timeline.plan.settingsSnapshot.brand.logoAsset,options.logoBytes);
-  const rendererBuildHash = await selectedRendererBuildHash(options.root, pins), id = randomUUID();
-  const folder = path.join(options.outputRoot, id), scratch = path.join(options.root, '.cache', 'selected-renderer', id), publicDir = path.join(scratch, 'public');
+  const rendererBuildHash = await selectedRendererBuildHash(options.root, pins), id = options.artifactId??randomUUID();
+  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id))throw new Error('Invalid artifact identity.');
+  if(options.scratchRoot&&!/^\.cache\/executors\/[a-f0-9]{32}\/scratch$/.test(path.relative(options.root,options.scratchRoot).split(path.sep).join('/')))throw new Error('Invalid executor workspace.');
+  const folder = path.join(options.outputRoot, id), scratch = options.scratchRoot??path.join(options.root, '.cache', 'selected-renderer', id), publicDir = path.join(scratch, 'public');
   await fs.mkdir(folder, {recursive: true}); await fs.mkdir(path.join(publicDir, 'fonts'), {recursive: true});
   if(logo)await fs.writeFile(path.join(publicDir,'brand-logo.png'),logo,{flag:'wx'});
   for (const font of fonts) await fs.writeFile(path.join(publicDir, 'fonts', `${font.role}.woff2`), font.bytes);

@@ -18,26 +18,35 @@ import {MeasuredDurationError,MeasuredPacingError} from './selected-timing.js';
 import {preflightSelectedLayout} from './layout-preflight';
 import {TextLayoutError} from '../video/selected-layout';
 import {ExecutorStopUnconfirmed} from './executor-stop';
+import {assembleSelected} from './selected-timing';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
+  readonly executionProtocol='windows-job-v1' as const;
+  executor?:{execute(runId:string,stage:'preflight'|'render',input:Record<string,unknown>,signal:AbortSignal,prepare?:(folder:string)=>Promise<void>):Promise<any>;recover(runId:string):Promise<boolean>};
   capabilities = [...requiredCapabilities,brandPaletteCapability,brandLogoCapability];
   constructor(private root: string, private env: Env) {}
   async inspect() {
     if (this.env.REMOTION_FREE_LICENSE_CONFIRMED !== 'true' || !this.env.ELEVENLABS_API_KEY?.trim()) throw new GenerationFault('GENERATION_CONFIGURATION_REQUIRED');
+    if(process.platform!=='win32')throw new GenerationFault('ENGINE_NOT_CAPABLE');
     const browsers = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'];
     if (!(await Promise.all(browsers.map(file => fs.access(file).then(() => true, () => false)))).some(Boolean)) throw new GenerationFault('LOCAL_BROWSER_REQUIRED');
     await fs.access(await binary('ffmpeg')); await fs.access(await binary('ffprobe'));
     const {pins} = await selectedFontAssets(this.root); return {fonts: pins, rendererBuildHash: await selectedRendererBuildHash(this.root, pins)};
   }
   async observe() {try {return await new ProviderGateway(this.env).observe('elevenlabs');} catch {throw new GenerationFault('FREE_SPEECH_UNAVAILABLE');}}
-  async preflight(plan: RenderPlan, hash: string, signal: AbortSignal) {
-    try {return await preflightSelectedLayout({root: this.root, plan, expectedHash: hash, signal});}
+  async preflight(plan: RenderPlan, hash: string, signal: AbortSignal,runId?:string) {
+    try {
+      if(runId){if(!this.executor)throw new GenerationFault('ENGINE_NOT_CAPABLE');return await this.executor.execute(runId,'preflight',{plan,hash},signal);}
+      return await preflightSelectedLayout({root: this.root, plan, expectedHash: hash, signal});
+    }
     catch (error) {
+      if(error instanceof GenerationFault)throw error;
       if (error instanceof ExecutorStopUnconfirmed) throw new GenerationFault('EXECUTOR_STOP_UNCONFIRMED', true);
       signal.throwIfAborted();
       throw new GenerationFault(error instanceof TextLayoutError ? 'TEXT_LAYOUT_EXCEEDED' : 'LAYOUT_CHECK_UNAVAILABLE');
     }
   }
+  async recoverExecutors(runId:string){return this.executor?this.executor.recover(runId):false;}
   speech(plan: RenderPlan, segmentId: string, signal: AbortSignal) {return new GenerationSpeechGateway(this.env).synthesize(plan, segmentId, signal);}
   readSpeech(source: SpeechFile, signal: AbortSignal) {return readVerifiedSpeech(this.root,source,signal);}
   async persistSpeech(runId: string, attemptId: string, audio: MeasuredSpeech) {
@@ -50,8 +59,15 @@ export class LiveGenerationEngine implements GenerationEngine {
   async logo(object:LogoObject,signal:AbortSignal){signal.throwIfAborted();const store=new LogoObjectStore(this.env);try{const bytes=await store.read(object);signal.throwIfAborted();return bytes;}finally{store.close();}}
   async render(runId: string, plan: RenderPlan, hash: string, clips: SpeechClip[], signal: AbortSignal, logo?:Buffer) {
     requireProjectId(runId);
-    const result = await renderSelectedVideo({root: this.root, outputRoot: path.join(this.root, 'output', 'dashboard-renders', runId), plan, expectedHash: hash, clips, mode: 'elevenlabs-evaluation',
-      logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal}).catch(error => {
+    const result = await (async()=>{
+      // Pure validation preserves early duration/hash refusals, with no process.
+      assembleSelected(plan,hash,clips,'elevenlabs-evaluation');
+      if(!this.executor||this.env.REMOTION_FREE_LICENSE_CONFIRMED!=='true')throw new GenerationFault('ENGINE_NOT_CAPABLE');
+      return this.executor.execute(runId,'render',{plan,hash,logo:!!logo,clips:clips.map(c=>({segmentId:c.segmentId,text:c.text,source:c.source,sampleRate:c.audio.sampleRate}))},signal,async folder=>{
+        for(const [i,c] of clips.entries())await fs.writeFile(path.join(folder,`clip-${i}.f32`),Buffer.from(c.audio.samples.buffer,c.audio.samples.byteOffset,c.audio.samples.byteLength),{flag:'wx'});
+        if(logo)await fs.writeFile(path.join(folder,'logo.png'),logo,{flag:'wx'});
+      });
+    })().catch(error => {
         if (error instanceof ExecutorStopUnconfirmed) throw new GenerationFault('EXECUTOR_STOP_UNCONFIRMED', true);
         if (error instanceof MeasuredDurationError) throw new GenerationFault('NARRATION_DURATION_EXCEEDED');
         if (error instanceof MeasuredPacingError) throw new GenerationFault('NARRATION_TOO_SHORT');

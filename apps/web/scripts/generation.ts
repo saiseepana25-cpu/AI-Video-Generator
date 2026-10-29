@@ -9,6 +9,7 @@ import {LiveGenerationEngine} from '../../../src/pipeline/generation-engine';
 import {GenerationFault} from '../src/server/generation/engine';
 import {runGenerationWorker,GenerationLoopFailure} from '../src/server/generation/loop';
 import {workerFailureCode} from '../src/server/generation/poll-error';
+import {DatabaseExecutor} from '../src/server/generation/executor-service';
 async function main() {
   const command = process.argv[2]; if (!['worker', 'status'].includes(command) || process.argv.length !== 3) throw new Error('Use generation worker | status');
   const root = path.resolve(process.cwd(), '../..'); config({path: path.join(root, '.env.local'), override: false, quiet: true} as Parameters<typeof config>[0]);
@@ -21,7 +22,8 @@ async function main() {
       console.log({state: row?.state ?? 'not_started', heartbeatFresh: !!row && row.heartbeatAt.getTime() > Date.now() - 30000 && row.expiresAt > new Date(),
         queued: await db.collection<GenerationRun>('generation_runs').countDocuments({state: 'queued'}), active: await db.collection<GenerationRun>('generation_runs').countDocuments({state: {$in: ['running', 'cancellation_requested']}})}); return;
     }
-    const worker = new GenerationWorker(client, settings.databaseName, process.env, new LiveGenerationEngine(root, process.env));
+    const engine=new LiveGenerationEngine(root,process.env),worker = new GenerationWorker(client, settings.databaseName, process.env, engine);
+    engine.executor=new DatabaseExecutor(client,settings.databaseName,root,worker.owner);
     const shutdown=new AbortController();let stopTask:Promise<void>|undefined;
     const stop = () => {shutdown.abort();stopTask??=worker.stop().catch(error=>console.error(JSON.stringify({event:'generation_stop_signal_failed',reason:workerFailureCode(error)})));};
     process.once('SIGINT', stop); process.once('SIGTERM', stop);

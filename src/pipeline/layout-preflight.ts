@@ -10,14 +10,15 @@ import {TextLayoutError, isTextLayoutRefusal} from '../video/selected-layout';
 import {requireBrowserStopped} from './executor-stop';
 
 /** Spatial check only: no audio, duration estimates, provider calls or video artifact. */
-export async function preflightSelectedLayout(options: {root: string; plan: unknown; expectedHash: string; signal: AbortSignal}) {
+export async function preflightSelectedLayout(options: {root: string; plan: unknown; expectedHash: string; signal: AbortSignal; scratchRoot?:string}) {
   options.signal.throwIfAborted();
   const plan = validateRenderPlan(options.plan);
   if (generationHash(plan) !== options.expectedHash) throw new Error('Approved layout input hash changed.');
   const {fonts, pins} = await selectedFontAssets(options.root);
   for (const font of plan.settingsSnapshot.brand.fonts) if (font.sha256 !== pins[font.role as keyof typeof pins]) throw new Error('Approved layout font bytes changed.');
   const rendererBuildHash = await selectedRendererBuildHash(options.root, pins);
-  const scratch = path.join(options.root, '.cache', 'layout-preflight', randomUUID()), publicDir = path.join(scratch, 'public');
+  if(options.scratchRoot&&!/^\.cache\/executors\/[a-f0-9]{32}\/scratch$/.test(path.relative(options.root,options.scratchRoot).split(path.sep).join('/')))throw new Error('Invalid executor workspace.');
+  const scratch = options.scratchRoot??path.join(options.root, '.cache', 'layout-preflight', randomUUID()), publicDir = path.join(scratch, 'public');
   await fs.mkdir(path.join(publicDir, 'fonts'), {recursive: true});
   for (const font of fonts) await fs.writeFile(path.join(publicDir, 'fonts', `${font.role}.woff2`), font.bytes, {flag: 'wx'});
   let browser: Awaited<ReturnType<typeof openBrowser>> | undefined;

@@ -25,6 +25,7 @@ import {localCleanupCollections} from './local-cleanup-schemas';
 import {speechCleanupCollections} from './speech-cleanup-schemas';
 import {reuseReleaseCollections} from './reuse-release-schemas';
 import {sourcePurgeCollections} from './source-purge-schemas';
+import {executorCollections} from './executor-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -68,6 +69,7 @@ const migrations = [
   {definition:{id:'023_speech_file_cleanup',description:'Reference-aware settled speech file cleanup checkpoints',contracts:speechCleanupCollections},checksum:createHash('sha256').update(JSON.stringify(speechCleanupCollections)).digest('hex')},
   {definition:{id:'024_speech_reuse_release',description:'Permanent exact reuse-reference release receipts for cleaned deleted targets',contracts:reuseReleaseCollections},checksum:createHash('sha256').update(JSON.stringify(reuseReleaseCollections)).digest('hex')},
   {definition:{id:'025_source_payload_purge',description:'Permanent minimal source-content purge receipts after completed ownership cleanup',contracts:sourcePurgeCollections},checksum:createHash('sha256').update(JSON.stringify(sourcePurgeCollections)).digest('hex')},
+  {definition:{id:'026_executor_termination',description:'Durable named Windows executor admission and physical stop evidence',contracts:executorCollections},checksum:createHash('sha256').update(JSON.stringify(executorCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 
