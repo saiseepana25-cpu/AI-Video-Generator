@@ -165,9 +165,13 @@ export class GenerationWorker {
       try {
         const logoObject=await this.approvedLogo(run,plan);let logo:Buffer|undefined;
         if(logoObject){if(!this.engine.logo)throw new GenerationFault('ENGINE_NOT_CAPABLE');logo=verifiedLogoBytes(plan.settingsSnapshot.brand.logoAsset,await this.engine.logo(logoObject,controller.signal))!;await this.approvedLogo(run,plan);}
+        // Font preflight also owns Chrome. Lease expiry during that call cannot
+        // prove process termination any more than expiry during video rendering.
+        await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'validating', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});
         const preflight = await this.engine.preflight(plan, run.inputHash, controller.signal);
         controller.signal.throwIfAborted();
         if (preflight.rendererBuildHash !== run.rendererBuildHash) throw new GenerationFault('RENDERER_CHANGED');
+        await databaseTransaction(this.client, this.name, async (db, session) => {await this.owned(db, session, run); await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {stage: 'plan_validation', updatedAt: new Date()}, $inc: {statusRevision: Long.ONE}}, {session});});
         const clips: SpeechClip[] = [];
         for (const segment of plan.narration) {
           const reused=await trySpeechReuse(this.client,this.name,this.env,this.engine,run,plan,segment.segmentId,controller.signal,async(db,session)=>{const owned=await this.owned(db,session,run);await this.guardLogo(db,session,run,plan);return owned;});
@@ -199,6 +203,12 @@ export class GenerationWorker {
           await this.finishWithin(db, session, current, null, {...result, runId: run._id, workspaceId: run.workspaceId, approvalId: run.approvalId, inputHash: run.inputHash, createdAt: new Date()});
         });
       } catch (error) {
+        if (error instanceof GenerationFault && error.code === 'EXECUTOR_STOP_UNCONFIRMED') {
+          // Stop polling without finalizing the run/reservation/project pointer.
+          // Replacement workers must keep the sole physical slot blocked.
+          this.stopping = true;
+          throw error;
+        }
         try {await databaseTransaction(this.client, this.name, async (db, session) => {
           const current = await this.owned(db, session, run, true);
           await this.finishWithin(db, session, current, error instanceof GenerationFault ? error.code : 'GENERATION_INTERRUPTED');

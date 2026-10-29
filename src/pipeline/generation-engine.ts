@@ -17,6 +17,7 @@ import {readVerifiedSpeech, type SpeechFile} from './speech-reader.js';
 import {MeasuredDurationError,MeasuredPacingError} from './selected-timing.js';
 import {preflightSelectedLayout} from './layout-preflight';
 import {TextLayoutError} from '../video/selected-layout';
+import {ExecutorStopUnconfirmed} from './executor-stop';
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 export class LiveGenerationEngine implements GenerationEngine {
   capabilities = [...requiredCapabilities,brandPaletteCapability,brandLogoCapability];
@@ -32,6 +33,7 @@ export class LiveGenerationEngine implements GenerationEngine {
   async preflight(plan: RenderPlan, hash: string, signal: AbortSignal) {
     try {return await preflightSelectedLayout({root: this.root, plan, expectedHash: hash, signal});}
     catch (error) {
+      if (error instanceof ExecutorStopUnconfirmed) throw new GenerationFault('EXECUTOR_STOP_UNCONFIRMED', true);
       signal.throwIfAborted();
       throw new GenerationFault(error instanceof TextLayoutError ? 'TEXT_LAYOUT_EXCEEDED' : 'LAYOUT_CHECK_UNAVAILABLE');
     }
@@ -50,6 +52,7 @@ export class LiveGenerationEngine implements GenerationEngine {
     requireProjectId(runId);
     const result = await renderSelectedVideo({root: this.root, outputRoot: path.join(this.root, 'output', 'dashboard-renders', runId), plan, expectedHash: hash, clips, mode: 'elevenlabs-evaluation',
       logoBytes:logo,licenseConfirmed: this.env.REMOTION_FREE_LICENSE_CONFIRMED === 'true', signal}).catch(error => {
+        if (error instanceof ExecutorStopUnconfirmed) throw new GenerationFault('EXECUTOR_STOP_UNCONFIRMED', true);
         if (error instanceof MeasuredDurationError) throw new GenerationFault('NARRATION_DURATION_EXCEEDED');
         if (error instanceof MeasuredPacingError) throw new GenerationFault('NARRATION_TOO_SHORT');
         if (error instanceof TextLayoutError) throw new GenerationFault('TEXT_LAYOUT_EXCEEDED');

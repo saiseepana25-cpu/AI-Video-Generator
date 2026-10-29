@@ -192,7 +192,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   for (const code of ['TEXT_LAYOUT_EXCEEDED','LAYOUT_CHECK_UNAVAILABLE']) test(`pre-speech ${code} releases unused reservation and exposes safe recovery without submission/reuse`,async()=>{
     await approve();engine.duringPreflight=async()=>{throw new GenerationFault(code);};
     await worker.tick();const failed=(await run())!;
-    assert.equal(failed.state,'failed');assert.equal(failed.stage,'plan_validation');assert.equal(failed.error?.code,code);
+    assert.equal(failed.state,'failed');assert.equal(failed.stage,'validating');assert.equal(failed.error?.code,code);
     assert.ok(failed.error!.message.length<=240);assert.equal(failed.error!.retryable,false);
     assert.equal(engine.preflightCalls,1);assert.equal(engine.speechCalls,0);assert.equal(engine.reuseReads,0);assert.equal(engine.renderCalls,0);
     assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);
@@ -204,7 +204,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   test('speech waits for successful preflight; the approved input then completes normally',async()=>{
     const started=deferred<void>(),release=deferred<void>();await approve();
     engine.duringPreflight=async()=>{started.resolve();await release.promise;};const ticking=worker.tick();await started.promise;
-    assert.equal((await run())!.stage,'plan_validation');assert.equal(engine.speechCalls,0);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);
+    assert.equal((await run())!.stage,'validating');assert.equal(engine.speechCalls,0);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),0);
     release.resolve();await ticking;assert.equal((await run())!.state,'rendered_local');assert.equal(engine.speechCalls,3);assert.equal(engine.preflightCalls,1);
   });
   test('cancellation during preflight stops before speech or artifact creation',async()=>{
@@ -329,6 +329,25 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   test('renderer failure preserves known settled speech without claiming provider uncertainty', async () => {
     await approve(); engine.renderFailure = true; await worker.tick(); assert.equal((await run())!.state, 'failed'); assert.equal((await provider())!.state, 'enabled'); assert.equal((await provider())!.reservations[0].state, 'settled'); assert.equal(await db.collection('generation_local_artifacts').countDocuments(), 0);
   });
+  for(const phase of ['preflight','render'] as const) for(const cancelling of [false,true]) {
+    test(`unconfirmed ${phase} shutdown ${cancelling?'during cancellation':'during failure'} retains the physical slot and stops polling`,async()=>{
+      await approve();
+      const unconfirmed=async()=>{if(cancelling)await cancelCurrent();throw new GenerationFault('EXECUTOR_STOP_UNCONFIRMED',true);};
+      if(phase==='preflight')engine.duringPreflight=unconfirmed;else engine.duringRender=unconfirmed;
+      await assert.rejects(worker.tick(),{code:'EXECUTOR_STOP_UNCONFIRMED'});
+      const retained=(await run())!;assert.equal(retained.state,cancelling?'cancellation_requested':'running');
+      assert.equal(retained.stage,phase==='preflight'?'validating':'rendering');assert.equal(retained.owner,worker.owner);
+      assert.equal(retained.finishedAt,null);assert.equal(retained.artifactId,null);
+      assert.equal((await db.collection<Row>('projects').findOne({_id:projectId}))!.latestRunId,retained._id);
+      assert.equal((await provider())!.reservations[0].state,'reserved');
+      assert.equal(await db.collection('generation_local_artifacts').countDocuments(),0);
+      assert.equal(await worker.tick(),false);
+      await db.collection<GenerationRun>('generation_runs').updateOne({_id:retained._id},{$set:{leaseUntil:new Date(0)}});
+      await worker.release();const replacementEngine=new FakeEngine(),replacement=new GenerationWorker(client,name,providerEnv,replacementEngine);
+      assert.equal(await replacement.heartbeat(),true);assert.equal(await replacement.recoverExpired(),0);assert.equal(await replacement.tick(),false);
+      assert.equal(replacementEngine.speechCalls,0);assert.equal(replacementEngine.renderCalls,0);
+    });
+  }
   test('measured duration failure retains settled speech and returns actionable status without retrying', async () => {
     await approve(); engine.duringRender = async () => {throw new GenerationFault('NARRATION_DURATION_EXCEEDED');};
     await worker.tick();

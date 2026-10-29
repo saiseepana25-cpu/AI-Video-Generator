@@ -1169,3 +1169,7 @@ No product-language, billing, team, hosting or UI scope was expanded. Potential 
 - [Auth.js MongoDB adapter](https://authjs.dev/getting-started/adapters/mongodb): preserve the installed adapter contract and verify actual ID/index behavior.
 
 Primary references were reviewed on 20 October 2026. Field names, bounds, state policy and transaction recipes are proposed application design. No schema/index migration, purchase, deployment or external publication was performed while creating these documents. Next: use the API states/operations and these invariants to reconcile Google Stitch screens, then implement after UI approval.
+
+### Shutdown uncertainty safeguard (29 October 2026)
+
+Browser close errors must never be suppressed into successful artifacts or ordinary terminal failures. The selected renderer marks its manifest executor_stop_unconfirmed and throws a sanitized typed error if final close rejects. The live adapter maps this before abort/layout errors. The generation worker stops without finalizing the active run/reservation/project pointer; replacement/expired-lease recovery remains blocked. Font preflight enters existing validating stage before its Chrome call, returning to plan_validation only after successful shutdown. This extends existing lease protection to preflight; it does not add a process-stop recovery receipt or authorize manual lease clearing. No schema migration or public action change. Successful stored videos keep their existing immutable hashes/availability.

@@ -7,6 +7,7 @@ import {openBrowser, selectComposition} from '@remotion/renderer';
 import {generationHash, validateRenderPlan} from './render-contract';
 import {selectedFontAssets, selectedRendererBuildHash} from './selected-renderer';
 import {TextLayoutError, isTextLayoutRefusal} from '../video/selected-layout';
+import {requireBrowserStopped} from './executor-stop';
 
 /** Spatial check only: no audio, duration estimates, provider calls or video artifact. */
 export async function preflightSelectedLayout(options: {root: string; plan: unknown; expectedHash: string; signal: AbortSignal}) {
@@ -43,6 +44,6 @@ export async function preflightSelectedLayout(options: {root: string; plan: unkn
   } finally {
     options.signal.removeEventListener('abort', abort);
     // Failed shutdown cannot be a successful preflight followed by speech.
-    await closeBrowser();
+    await requireBrowserStopped(closeBrowser);
   }
 }
