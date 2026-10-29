@@ -18,6 +18,18 @@ The local generation worker measures approved caption/heading/diagram text using
 
 `npm run test:layout` is an explicit local Chrome/font integration suite for English/Telugu fitting and overflow, with no credentials, AI requests, speech, database or R2 use. The regular root tests remain `npm test`; the runnable root video prototype is unchanged.
 
+## Deleted-project source-retention audit (F14c5c1)
+
+```text
+npm.cmd run web:cleanup -- source-audit <deleted-project-id>
+```
+
+This operator-only command takes a read-only MongoDB snapshot of a tombstoned project with a deletion receipt. It returns bounded record counts and safe blockers for unresolved/uncertain work, incomplete media/speech checkpoints, unreleased reuse references, copied-plan provenance, inconsistent scope and unknown publishing/asset owners. It emits no source text, canonical input, object address or credential. Each inventory reads at most 201 rows and reports at most 200 plus `truncated`; missing indirect rows beyond that bound cannot turn into a complete assessment. Snapshot/driver errors fail with sanitized CLI output, never a partial success report.
+
+`blocked` means known evidence requires resolution. `review_required` means the bounded checks found no listed blockers; it does **not** mean that content may be purged. Every result says `retainedContent: true` and `purgeImplemented: false`. Counts do not prove physical absence or completed cleanup, and the report is not a reusable authorization token. Global unknown publication payloads or generic asset references conservatively block review even if apparently unrelated, matching the current cleanup boundary. No database/file/R2 write, provider call, guard advance, lease recovery, migration, HTTP endpoint or UI change is involved.
+
+Source-content purge and minimal permanent receipt policy remain the next separate increment. Source/history/approval/replay/attempt/reuse records, shared branding, scratch/unpromoted/orphan content and active executors remain retained.
+
 ## Retiring obsolete speech-reuse references (F14c5b)
 
 Apply/audit migration **024** and restart app/workers. After deleted-project ready-media and local-render cleanup, an operator can run:
