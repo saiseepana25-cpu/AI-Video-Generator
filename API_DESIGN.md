@@ -1168,3 +1168,5 @@ These refine engineering contracts without changing the approved product scope. 
 - [R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/): scoped temporary media access.
 
 Primary protocol/vendor references were checked on 20 October 2026. Endpoint names, DTOs, numeric product defaults, and limits here are proposed application contracts, not evidence that future routes are already deployed.
+
+F14c5c2 (29 October 2026): operator-local purge-source now removes the explicitly bounded source-payload scope only after transactionally revalidated tombstone, resolved work, accounting and physical-cleanup proofs. It has no HTTP endpoint or public deletion DTO change. Operator status adds sourceCleanup (not_started/source_records_removed), retainedMetadata:true and allDataErased:false. Source-audit advertises purgeImplemented:true but grants no authority. Exact policy, permanent migration-025 receipt, replay/drift/rollback and retention boundaries are in database section 13 and README. No automatic source purge, file deletion, provider call or executor recovery is introduced.

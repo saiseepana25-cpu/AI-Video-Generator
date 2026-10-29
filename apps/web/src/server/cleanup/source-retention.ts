@@ -101,9 +101,9 @@ export async function sourceRetentionAudit(client: MongoClient, name: string, pr
       || await exists(db, session, 'project_duplicate_commands', {sourceProjectId: projectId, projectId: {$ne: projectId}})) blockers.add('copied_plan_provenance');
     return {schemaVersion: 1 as const, projectId, observedAt: new Date().toISOString(), revision, guardRevision,
       state: blockers.size ? 'blocked' as const : 'review_required' as const,
-      retainedContent: true as const, purgeImplemented: false as const, perCollectionLimit: limit, counts,
+      retainedContent: true as const, purgeImplemented: true as const, perCollectionLimit: limit, counts,
       blockers: [...blockers].sort().map(code => ({code, message: faults[code]})),
-      limitations: 'Read-only metadata snapshot. No purge permission, physical absence proof, complete orphan inventory or permanent retention policy. All source and recovery records remain retained.'};
+      limitations: 'Read-only metadata snapshot. No purge permission, physical absence proof, complete orphan inventory or purge eligibility. This audit performs no cleanup; the separate purge-source command must re-prove its bounded source scope.'};
   });
 }
 

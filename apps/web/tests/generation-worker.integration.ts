@@ -46,6 +46,8 @@ import {VideoService, promoteStoredVideo} from '../src/server/videos/service';
 import type {ReadyVideo} from '../src/server/videos/contracts';
 import {VideoHistoryService} from '../src/server/videos/history';
 import {RevisionReviewService} from '../src/server/planning/revision-review';
+import {SourcePurgeService} from '../src/server/cleanup/source-purge';
+import {sourcePurgeCollections} from '../src/server/db/source-purge-schemas';
 import {PlanEditService} from '../src/server/planning/plan-edit-service';
 
 const uri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27028/?replicaSet=vcF03';
@@ -71,7 +73,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['source_purge_receipts','speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -472,6 +474,45 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     const refs=await db.collection<Row>('generation_speech_reuses').find({runId:target._id}).sort({_id:1}).toArray(),removed:string[]=[],speechFiles={rootHash:files.rootHash,async inspect(){},async remove(source:SpeechSource){removed.push(source.attemptId);}};
     return {first,target,projects,local,refs,removed,release:new ReuseReleaseService(client,name),speech:new SpeechCleanupService(client,name,speechFiles)};
   }
+  test('source purge follows all physical checkpoints, preserves minimal recovery metadata and replays without another fence',async()=>{
+    const {speechCleanup}=await speechCleanupSetup();while(await speechCleanup.next(projectId)){}
+    const purge=new SourcePurgeService(client,name),result=await purge.purge(projectId);
+    assert.equal(result.sourceRecordsRemoved,true);assert.equal(result.allDataErased,false);
+    for(const collection of ['plan_versions','approvals','ready_videos'])assert.equal(await db.collection(collection).countDocuments({projectId}),0);
+    const project=(await db.collection<Row>('projects').findOne({_id:projectId}))!;assert.equal(project.brief.idea,'Source removed');assert.equal(project.displayTitle,'Deleted project');assert.equal(project.currentPlanVersionId,null);
+    assert.equal(await db.collection('generation_runs').countDocuments({projectId}),1);assert.equal(await db.collection('generation_speech_attempts').countDocuments(),3);assert.equal(await db.collection('media_cleanup_tasks').countDocuments({state:'deleted'}),5);assert.equal(await db.collection('speech_cleanup_tasks').countDocuments({state:'removed'}),3);
+    assert.equal((await purge.purge(projectId)).replayed,true);assert.equal((await db.collection<Row>('projects').findOne({_id:projectId}))!.guardRevision.toString(),project.guardRevision.toString());
+    const receipt=await db.collection<Row>('source_purge_receipts').findOne({_id:projectId});assert(!JSON.stringify(receipt).includes('Water moves into rivers.'));await checkDatabase(db);
+  });
+  test('source purge refuses incomplete speech cleanup; receipt failure rolls back every source deletion',async()=>{
+    const {speechCleanup}=await speechCleanupSetup(),purge=new SourcePurgeService(client,name);
+    await assert.rejects(purge.purge(projectId));assert.equal(await db.collection('plan_versions').countDocuments({projectId}),1);
+    while(await speechCleanup.next(projectId)){}
+    const before=await db.collection<Row>('projects').findOne({_id:projectId});
+    await db.command({collMod:'source_purge_receipts',validator:{$jsonSchema:{required:['controlled_failure']}}});
+    try{await assert.rejects(purge.purge(projectId));}finally{await db.command({collMod:'source_purge_receipts',validator:sourcePurgeCollections[0].validator});}
+    assert.deepEqual(await db.collection<Row>('projects').findOne({_id:projectId}),before);assert.equal(await db.collection('approvals').countDocuments({projectId}),1);assert.equal(await db.collection('ready_videos').countDocuments({projectId}),1);assert.equal(await db.collection('source_purge_receipts').countDocuments(),0);
+    assert.equal((await purge.purge(projectId)).replayed,false);
+  });
+  test('source purge retains content for reserved or uncertain usage even after physical cleanup',async()=>{
+    const {speechCleanup,current}=await speechCleanupSetup();while(await speechCleanup.next(projectId)){}
+    const purge=new SourcePurgeService(client,name);
+    for(const state of ['reserved','uncertain']){
+      await db.collection<Row>('provider_controls').updateOne({_id:'elevenlabs','reservations.id':current.reservationId},{$set:{'reservations.$.state':state}});
+      await assert.rejects(purge.purge(projectId),{code:'SOURCE_PURGE_UNAVAILABLE'});
+      assert.equal(await db.collection('approvals').countDocuments({projectId}),1);
+      assert.equal(await db.collection('source_purge_receipts').countDocuments(),0);
+    }
+    await db.collection<Row>('provider_controls').updateOne({_id:'elevenlabs','reservations.id':current.reservationId},{$set:{'reservations.$.state':'settled'}});
+    assert.equal((await purge.purge(projectId)).sourceRecordsRemoved,true);
+  });
+  test('concurrent source purge has one receipt and detects resurrected source content on replay',async()=>{
+    const {speechCleanup}=await speechCleanupSetup();while(await speechCleanup.next(projectId)){}
+    const purge=new SourcePurgeService(client,name),results=await Promise.all([purge.purge(projectId),new SourcePurgeService(client,name).purge(projectId)]);
+    assert.equal(results.filter(r=>!r.replayed).length,1);assert.equal(await db.collection('source_purge_receipts').countDocuments(),1);
+    await db.collection<Row>('projects').updateOne({_id:projectId},{$set:{'brief.idea':'Resurrected private source'}});
+    await assert.rejects(purge.purge(projectId),{code:'SOURCE_PURGE_DRIFT'});
+  });
   test('reuse release retires cleaned deleted-target pins without deleting original evidence',async()=>{
     const {release,speech,refs,removed,first}=await reuseReleaseSetup();const original=await db.collection<Row>('generation_speech_reuses').find({}).sort({_id:1}).toArray();assert.equal(refs.length,3);assert.equal(await speech.next(projectId),false);while(await release.next(projectId)){}assert.deepEqual(await db.collection<Row>('generation_speech_reuses').find({}).sort({_id:1}).toArray(),original);assert.equal(await release.next(projectId),false);assert.equal((await reuseReleaseStatus(db,testWorkspaceId,projectId)).releaseReceipts,3);assert.equal((await speechCleanupStatus(db,testWorkspaceId,projectId)).pinnedAttempts,0);while(await speech.next(projectId)){}assert.equal(removed.length,3);assert.equal(await db.collection('generation_speech_attempts').countDocuments({runId:first.current._id}),3);assert.equal(await db.collection('approvals').countDocuments(),2);assert.equal(engine.speechCalls,3);assert.equal(engine.renderCalls,2);await checkDatabase(db);
   });

@@ -22,7 +22,7 @@ export async function localRenderStatus(db:Db,workspaceId:string,projectId:strin
 export class LocalCleanupService{
   constructor(private client:MongoClient,private name:string,private files:LocalFileCleaner){}
   private get db(){return this.client.db(this.name);}
-  private async proof(db:Db,session:ClientSession,runId:string){
+  static async proof(db:Db,session:ClientSession,runId:string){
     const run=await db.collection<GenerationRun>('generation_runs').findOne({_id:runId,state:'rendered_local'},{session});
     if(!run?.artifactId||run.owner!==null||run.leaseUntil!==null||!(run.finishedAt instanceof Date))throw fault();
     const project=await db.collection<ProjectRecord>('projects').findOne({_id:run.projectId,workspaceId:run.workspaceId,deletedAt:{$type:'date'}},{session});if(!project?.deletionReceipt)throw fault();
@@ -43,13 +43,13 @@ export class LocalCleanupService{
   private async fence(db:Db,session:ClientSession,project:ProjectRecord){advance(project.guardRevision);if(!(await db.collection<ProjectRecord>('projects').updateOne({_id:project._id,workspaceId:project.workspaceId,deletedAt:project.deletedAt,guardRevision:project.guardRevision},{$inc:{guardRevision:Long.ONE}},{session})).matchedCount)throw fault();}
   async clean(runId:string){
     requireProjectId(runId);
-    const initial=await databaseTransaction(this.client,this.name,async(db,session)=>{const proof=await this.proof(db,session,runId),prior=await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({_id:proof.source.artifactId},{session});return {...proof,prior};});
+    const initial=await databaseTransaction(this.client,this.name,async(db,session)=>{const proof=await LocalCleanupService.proof(db,session,runId),prior=await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({_id:proof.source.artifactId},{session});return {...proof,prior};});
     const {source,project,prior}=initial;
     if(prior&&(prior.rootHash!==this.files.rootHash||prior.runId!==runId||prior.workspaceId!==project.workspaceId||prior.projectId!==project._id||!isDeepStrictEqual(prior.source,source)))throw fault();
     if(prior?.state==='cleaned')return false;
     const inventory=prior?.files??await this.files.inspect(source);
     const task=await databaseTransaction(this.client,this.name,async(db,session)=>{
-      const current=await this.proof(db,session,runId);if(!isDeepStrictEqual(current.source,source))throw fault();
+      const current=await LocalCleanupService.proof(db,session,runId);if(!isDeepStrictEqual(current.source,source))throw fault();
       const old=await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({_id:source.artifactId},{session});
       if(old&&(old.rootHash!==this.files.rootHash||!isDeepStrictEqual(old.source,source)||!isDeepStrictEqual(old.files,inventory)||old.workspaceId!==project.workspaceId||old.projectId!==project._id))throw fault();
       if(old?.state==='cleaned')return null;
@@ -58,7 +58,7 @@ export class LocalCleanupService{
       if(old){if(!(await db.collection<LocalTask>('local_render_cleanup_tasks').replaceOne({_id:old._id,revision:old.revision},task,{session})).matchedCount)throw fault();}else await db.collection<LocalTask>('local_render_cleanup_tasks').insertOne(task,{session});return task;
     });if(!task)return false;
     try{await this.files.remove(task.source,task.files);}catch{await this.db.collection<LocalTask>('local_render_cleanup_tasks').updateOne({_id:task._id,state:'pending',revision:task.revision},{$set:{state:'retry',error:'LOCAL_REMOVAL_FAILED',updatedAt:new Date()}});throw new CleanupFault('LOCAL_REMOVAL_FAILED');}
-    return databaseTransaction(this.client,this.name,async(db,session)=>{const proof=await this.proof(db,session,runId);if(!isDeepStrictEqual(proof.source,task.source))throw fault();const current=await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({_id:task._id,revision:task.revision,state:'pending'},{session});if(!current)return false;if(!isDeepStrictEqual(current,task))throw fault();await this.fence(db,session,proof.project);const now=new Date();return !!(await db.collection<LocalTask>('local_render_cleanup_tasks').updateOne({_id:task._id,revision:task.revision,state:'pending'},{$set:{state:'cleaned',cleanedAt:now,updatedAt:now,error:null}},{session})).matchedCount;});
+    return databaseTransaction(this.client,this.name,async(db,session)=>{const proof=await LocalCleanupService.proof(db,session,runId);if(!isDeepStrictEqual(proof.source,task.source))throw fault();const current=await db.collection<LocalTask>('local_render_cleanup_tasks').findOne({_id:task._id,revision:task.revision,state:'pending'},{session});if(!current)return false;if(!isDeepStrictEqual(current,task))throw fault();await this.fence(db,session,proof.project);const now=new Date();return !!(await db.collection<LocalTask>('local_render_cleanup_tasks').updateOne({_id:task._id,revision:task.revision,state:'pending'},{$set:{state:'cleaned',cleanedAt:now,updatedAt:now,error:null}},{session})).matchedCount;});
   }
   async next(projectId:string){requireProjectId(projectId);const [run]=await this.db.collection<GenerationRun>('generation_runs').aggregate<GenerationRun>([{$match:{projectId,state:'rendered_local',artifactId:{$type:'string'}}},{$lookup:{from:'local_render_cleanup_tasks',localField:'artifactId',foreignField:'_id',as:'task'}},{$match:{'task.0.state':{$ne:'cleaned'}}},{$sort:{createdAt:1,_id:1}},{$limit:1}]).toArray();if(!run)return false;await this.clean(run._id);return true;}
 }

@@ -44,7 +44,7 @@ describe('read-only deleted-project source retention audit', {concurrency: false
     await insert('idempotency_records', {safeResultRef: {id: project._id}, safeResponseSnapshot: {brief: 'PRIVATE_REPLAY_MARKER'}});
     const before = await db.collection<Row>('projects').findOne({_id: project._id}); writes.length = 0;
     const result = await audit();
-    assert.equal(result.state, 'review_required'); assert.equal(result.purgeImplemented, false); assert.equal(result.retainedContent, true);
+    assert.equal(result.state, 'review_required'); assert.equal(result.purgeImplemented, true); assert.equal(result.retainedContent, true);
     assert.deepEqual(result.counts.plan_versions, {count: 1, truncated: false});
     assert.deepEqual(result.counts.idempotency_records, {count: 1, truncated: false});
     assert.equal(result.counts.project_delete_commands.count, 1);
@@ -109,7 +109,7 @@ describe('read-only deleted-project source retention audit', {concurrency: false
   test('bounded inventories disclose truncation, never an eligibility result or private row data', async () => {
     await db.collection<Row>('plan_versions').insertMany(Array.from({length: 201}, (_, i) => ({_id: randomUUID(), workspaceId: testWorkspaceId, projectId: project._id, versionNumber: Long.fromNumber(i + 1), sourcePlanningRequestId: randomUUID(), privateText: 'PRIVATE_OVER_LIMIT'})), {bypassDocumentValidation: true});
     const result = await audit(); assert.deepEqual(result.counts.plan_versions, {count: 200, truncated: true});
-    assert(codes(result).includes('inventory_limit')); assert.equal(result.state, 'blocked'); assert.equal(result.purgeImplemented, false);
+    assert(codes(result).includes('inventory_limit')); assert.equal(result.state, 'blocked'); assert.equal(result.purgeImplemented, true);
     assert(!JSON.stringify(result).includes('PRIVATE_'));
   });
   test('operator CLI reports the isolated fixture without credentials, content or mutations', async () => {
@@ -120,7 +120,7 @@ describe('read-only deleted-project source retention audit', {concurrency: false
     });
     const result = JSON.parse(stdout);
     assert.equal(result.projectId, project._id); assert.equal(result.state, 'review_required');
-    assert.equal(result.retainedContent, true); assert.equal(result.purgeImplemented, false);
+    assert.equal(result.retainedContent, true); assert.equal(result.purgeImplemented, true);
     assert(!stdout.includes(uri)); assert(!stdout.includes('PRIVATE_')); assert.equal(stderr, '');
     assert.deepEqual(await db.collection<Row>('projects').findOne({_id: project._id}), before);
     await assert.rejects(promisify(execFile)(process.execPath, ['--import', 'tsx', 'scripts/cleanup.ts', 'source-audit', randomUUID()], {
