@@ -34,6 +34,20 @@ describe('immutable direct plan text edits on a real replica set', {concurrency:
   });
   after(async () => {try {if (!/^videocraft_f08_test_[a-f0-9]{32}$/.test(name)) throw new Error('Unsafe cleanup'); await db.dropDatabase();} finally {await client.close();}});
   const body = () => ({expectedProjectRevision: 1, edits: {narration: [{segmentId: 'scene_1', text: 'Rain falls into rivers.'}], headings: [{sceneId: 'scene_1', text: 'Rainfall'}]}});
+  test('sentence split saves one immutable revision with exact replay and matching captions, never generation', async () => {
+    base.plan.scenes.forEach(s => s.narration = 'Water rises. Clouds form.');
+    base.plan.captions.forEach(c => c.text = 'Water rises. Clouds form.');
+    await db.collection<PlanVersion>('plan_versions').replaceOne({_id: base._id}, base);
+    const key = randomUUID(), input = {expectedProjectRevision: 1, edits: {splitNarration: true}};
+    const result = await edits.edit(base._id, input, key);
+    assert.equal(result.plan.plan.scenes.length, 6); assert.equal(result.plan.versionNumber, 2); assert.equal(result.plan.projectRevision, 2);
+    assert.equal((await edits.edit(base._id, input, key)).plan.id, result.plan.id);
+    assert.deepEqual(await db.collection<PlanVersion>('plan_versions').findOne({_id: base._id}), base);
+    assert.equal(await db.collection('plan_edit_commands').countDocuments(), 1);
+    assert.equal(await db.collection('approvals').countDocuments(), 0); assert.equal(await db.collection('generation_runs').countDocuments(), 0);
+    await assert.rejects(edits.edit(base._id, input, randomUUID()), {code: 'STALE_REVISION'});
+    await checkDatabase(db);
+  });
   const renderInputs = () => new RenderInputService(client, name, context, providerEnv, async () => pins);
   async function selectRenderVoice() {
     const project = await projects.get(base.projectId), settings = {...project.settings, voiceCatalogId: 'alice-evaluation', accentId: 'source-voice'};

@@ -1,7 +1,9 @@
 import {ProjectError} from '../projects/contracts';
 import type {Plan, Scene} from './contracts';
+import {splitNarrationScenes} from '../../lib/split-narration';
 
 export type TextEditInput = {expectedProjectRevision: number; edits: {
+  splitNarration?: true;
   narration?: {segmentId: string; text: string}[]; headings?: {sceneId: string; text: string}[];
   diagrams?: {sceneId: string; labels: string[]; layout: Scene['layout']}[];
 }};
@@ -15,7 +17,11 @@ export function parseTextEdits(raw: unknown): TextEditInput {
   const body = object(raw, ['expectedProjectRevision', 'edits']);
   if (body.expectedProjectRevision === undefined) throw new ProjectError('PRECONDITION_REQUIRED', 428, 'Include the saved project revision.');
   if (!Number.isSafeInteger(body.expectedProjectRevision) || (body.expectedProjectRevision as number) < 1) return invalid('Use a positive safe integer revision.');
-  const source = object(body.edits, ['narration', 'headings', 'diagrams']), edits: TextEditInput['edits'] = {};
+  const source = object(body.edits, ['narration', 'headings', 'diagrams', 'splitNarration']), edits: TextEditInput['edits'] = {};
+  if ('splitNarration' in source) {
+    if (source.splitNarration !== true || Object.keys(source).length !== 1) return invalid('Split narration must be true and saved separately from text edits.');
+    return {expectedProjectRevision: body.expectedProjectRevision as number, edits: {splitNarration: true}};
+  }
   for (const field of ['narration', 'headings'] as const) {
     if (!(field in source)) continue;
     const items = source[field], idKey = field === 'narration' ? 'segmentId' : 'sceneId';
@@ -55,6 +61,12 @@ export function parseTextEdits(raw: unknown): TextEditInput {
 }
 export function applyTextEdits(base: Plan, input: TextEditInput): Plan {
   const plan = structuredClone(base), ids = new Set(plan.scenes.map(s => s.sceneId));
+  if (input.edits.splitNarration) {
+    try {plan.scenes = splitNarrationScenes(plan.scenes);}
+    catch (error) {return invalid(error instanceof Error ? error.message : 'This plan could not be split.');}
+    plan.captions = plan.scenes.map(s => ({captionId: `caption_${s.sceneId}`, sourceSegmentId: s.sceneId, text: s.narration}));
+    return plan;
+  }
   for (const change of [...(input.edits.narration ?? []).map(c => ({id: c.segmentId, text: c.text, label: false})), ...(input.edits.headings ?? []).map(c => ({id: c.sceneId, text: c.text, label: false})), ...(input.edits.diagrams ?? []).flatMap(c => c.labels.map(text => ({id: c.sceneId, text, label: true})))]) {
     if (!ids.has(change.id)) return invalid('Structural scene changes are not supported.');
     if (plan.language === 'te' && (!change.label || /\p{L}/u.test(change.text)) && !/[\u0c00-\u0c7f]/u.test(change.text)) return invalid('Use Telugu text for a Telugu plan.');
