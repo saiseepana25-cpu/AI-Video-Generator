@@ -10,6 +10,7 @@ import {storageKinds,storageFiles} from '../storage/contracts';
 import type {ReadyVideo,VideoAsset} from '../videos/contracts';
 import type {CleanupTask} from './contracts';
 import {CleanupFault} from './contracts';
+import {unpromotedProof} from './unpromoted-service';
 import type {LocalTask,LocalFileCleaner,LocalStatus,LocalSource} from './local-contracts';
 const fault=()=>new CleanupFault('LOCAL_CLEANUP_OWNERSHIP_UNAVAILABLE');
 const advance=(n:Long)=>{if(!Long.isLong(n)||n.isNegative()||n.greaterThanOrEqual(Long.fromNumber(Number.MAX_SAFE_INTEGER)))throw fault();return n.add(Long.ONE);};
@@ -30,7 +31,8 @@ export class LocalCleanupService{
     const artifact=await db.collection<LocalArtifact>('generation_local_artifacts').findOne({_id:run.artifactId,runId,workspaceId:run.workspaceId,approvalId:run.approvalId,inputHash:run.inputHash,rendererBuildHash:run.rendererBuildHash},{session});
     const bundle=await db.collection<StorageBundle>('generation_storage_bundles').findOne({_id:run.artifactId,artifactId:run.artifactId,runId,workspaceId:run.workspaceId,projectId:run.projectId,approvalId:run.approvalId,inputHash:run.inputHash,rendererBuildHash:run.rendererBuildHash,state:'stored'},{session});
     const video=await db.collection<ReadyVideo>('ready_videos').findOne({_id:run.artifactId,bundleId:run.artifactId,runId,workspaceId:run.workspaceId,projectId:run.projectId},{session});
-    if(!artifact||!bundle||!video||artifact.manifestHash!==bundle.manifestHash||bundle.objects.length!==5||new Set(bundle.objects.map(o=>o.kind)).size!==5||await db.collection('publishing_payloads').findOne({},{session,projection:{_id:1}}))throw fault();
+    if(!artifact||!bundle||!Long.isLong(bundle.epoch)||!bundle.epoch.equals(Long.ONE)||artifact.manifestHash!==bundle.manifestHash||bundle.objects.length!==5||new Set(bundle.objects.map(o=>o.kind)).size!==5||await db.collection('publishing_payloads').findOne({},{session,projection:{_id:1}}))throw fault();
+    if(!video){await unpromotedProof(db,session,bundle,true);const source:LocalSource={runId,artifactId:artifact._id,manifestHash:artifact.manifestHash,inputHash:artifact.inputHash,rendererBuildHash:artifact.rendererBuildHash,objects:bundle.objects};return {project,source};}
     for(const kind of storageKinds){
       const object=bundle.objects.find(o=>o.kind===kind),spec=storageFiles[kind],assetId=video.assets[kind];
       if(!object||object.key!==`workspaces/${run.workspaceId}/projects/${run.projectId}/runs/${runId}/bundles/${run.artifactId}/${spec.name}`||object.mime!==spec.mime||!Number.isSafeInteger(object.size)||object.size<1||object.size>spec.max||!/^[a-f0-9]{64}$/.test(object.sha256))throw fault();

@@ -431,3 +431,30 @@ Explicit offline Windows interruption check: `node --import tsx --test tests/ren
 Apply/audit migration 026 and restart the generation worker after updating. New approvals require executor:windows-job-v1/current build. Actual preflight/render children are suspended in an owned Windows Job until durable admission, run without provider keys, and must drain all Job processes before stop acknowledgement. Cancellation targets only that Job. Recovery of expired supervised work verifies the exact local host/root/owner/epoch identity and OS stop evidence before freeing capacity; legacy or unknown executors remain blocked. No speech/render retry is introduced. This MVP executor is Windows-only; hosted execution remains separate work.
 
 Native integration checks: `node --import tsx --test tests/windows-executor.integration.ts`. Fixtures cover suspended admission, normal drain, owned subtree cancellation, supervisor loss, name collision, real Telugu font preflight and cancellation of a real offline diagnostic render. They create new ignored test artifacts and never use providers or delete retained user projects.
+
+### Bounded local lifecycle cleanup
+
+Operator commands (never run them against a retained QA/user project just to test):
+
+```powershell
+npm.cmd run web:cleanup -- orphan-audit
+npm.cmd run web:cleanup -- transient <project-id>
+npm.cmd run web:cleanup -- source-audit <deleted-project-id>
+npm.cmd run web:cleanup -- project <deleted-project-id>
+npm.cmd run web:cleanup -- unpromoted <deleted-project-id>
+npm.cmd run web:cleanup -- local <deleted-project-id>
+npm.cmd run web:cleanup -- release-reuse <deleted-project-id>
+npm.cmd run web:cleanup -- speech <deleted-project-id>
+npm.cmd run web:cleanup -- purge-source <deleted-project-id>
+```
+
+Transient cleanup may target a live project only for its terminal, stopped/sealed execution workspaces after 24 hours; completed video output is retained. Other mutation commands require an already deleted project and exact independent ownership proofs. Each batch is bounded to 100. Run Ready-media or unpromoted cleanup as applicable, then local/reuse/speech/source stages; dependencies may require another pass. Unknown/foreign/legacy/unsealed folders and uncertain/multiple-epoch uploads are retained for review, never removed by age or prefix. Shared logos/branding and permanent minimal metadata remain. `orphan-audit` is counts-only/read-only, not purge eligibility.
+
+Windows OS + isolated database crash/cancellation acceptance, using diagnostic sine audio and no provider credentials:
+
+```powershell
+cd apps/web
+node --import tsx --test tests/executor-crash.acceptance.ts
+```
+
+It uses a strict loopback test database and newly allocated fixture files only, kills its own render worker, verifies named Job stop proof before recovery, then checks real bounded cleanup. It also exercises requested cancellation. Whole-machine power loss and hosted execution remain separate deployment checks.

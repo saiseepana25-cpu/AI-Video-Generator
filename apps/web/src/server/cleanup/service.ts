@@ -28,7 +28,7 @@ export class MediaCleanupService{
     const work=await inspectDeletionWork(db,session,project);if(!work.impact.canDelete||work.planning.length||work.generation.length)throw fault();
     const video=await db.collection<ReadyVideo>('ready_videos').findOne({_id:asset.videoId,workspaceId:asset.workspaceId,projectId:asset.projectId,bundleId:asset.bundleId},{session});
     const bundle=await db.collection<StorageBundle>('generation_storage_bundles').findOne({_id:asset.bundleId,workspaceId:asset.workspaceId,projectId:asset.projectId,state:'stored',configHash:asset.configHash,bucket:asset.bucket},{session});
-    if(!video||!bundle||video.bundleId!==bundle._id||video.runId!==bundle.runId||video.configHash!==asset.configHash||video.bucket!==asset.bucket||bundle.artifactId!==bundle._id||video.assets[asset.object.kind]!==asset._id)throw fault();
+    if(!video||!bundle||!Long.isLong(bundle.epoch)||!bundle.epoch.equals(Long.ONE)||video.bundleId!==bundle._id||video.runId!==bundle.runId||video.configHash!==asset.configHash||video.bucket!==asset.bucket||bundle.artifactId!==bundle._id||video.assets[asset.object.kind]!==asset._id)throw fault();
     const run=await db.collection<GenerationRun>('generation_runs').findOne({_id:bundle.runId,workspaceId:asset.workspaceId,projectId:asset.projectId,state:'rendered_local',artifactId:bundle.artifactId,approvalId:bundle.approvalId,inputHash:bundle.inputHash},{session});
     const kind=asset.object.kind,file=storageFiles[kind];
     const expected=`workspaces/${asset.workspaceId}/projects/${asset.projectId}/runs/${bundle.runId}/bundles/${bundle.artifactId}/${file?.name}`;

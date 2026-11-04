@@ -47,6 +47,10 @@ public static class VideoCraftJob {
       if(job!=IntPtr.Zero&&error==183){CloseHandle(job);job=IntPtr.Zero;throw new Exception("EXECUTOR_NAME_COLLISION");}Need(job!=IntPtr.Zero);
       var limits=new Limits();limits.basic.flags=0x2000;Need(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(typeof(Limits))));
       var si=new Startup();si.cb=(UInt32)Marshal.SizeOf(typeof(Startup));
+      // Chrome/Remotion/FFmpeg temporary files belong to this execution, rather
+      // than the shared OS temp tree. The supervisor compiler itself is OS-managed.
+      string temp=System.IO.Path.Combine(System.IO.Path.GetDirectoryName(payload),"temp");System.IO.Directory.CreateDirectory(temp);
+      Environment.SetEnvironmentVariable("TEMP",temp);Environment.SetEnvironmentVariable("TMP",temp);
       var command=new StringBuilder(Quote(node)+" --import tsx "+Quote(System.IO.Path.Combine(root,"scripts","render-executor.ts"))+" "+Quote(payload));
       Need(CreateProcessW(node,command,IntPtr.Zero,IntPtr.Zero,false,0x08000004,IntPtr.Zero,root,ref si,out pi));
       Need(AssignProcessToJobObject(job,pi.process));assigned=true;

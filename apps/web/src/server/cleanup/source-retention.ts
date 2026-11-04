@@ -5,6 +5,8 @@ import type {ProjectRecord} from '../projects/service';
 import type {Row} from '../planning/service';
 import {CleanupFault} from './contracts';
 import {matchesReuseRelease, type ReuseRelease} from './reuse-pins';
+import {executionWorkspaceCleared} from './execution-proof';
+import type {GenerationRun} from '../generation/contracts';
 
 const limit = 200;
 const faults = {
@@ -16,6 +18,7 @@ const faults = {
   copied_plan_provenance: 'Another plan or duplication receipt still refers to this source.',
   scope_mismatch: 'Related metadata has inconsistent workspace/project scope.',
   inventory_limit: 'A bounded inventory was truncated; no complete assessment is possible.',
+  incomplete_execution_cleanup: 'Known executor workspaces or partial outputs lack matching completed cleanup proof.',
 } as const;
 type Blocker = keyof typeof faults;
 type Count = {count: number; truncated: boolean};
@@ -55,7 +58,9 @@ export async function sourceRetentionAudit(client: MongoClient, name: string, pr
       return read(collection, scope, fields);
     };
     const jobs = await scoped('jobs', {_id: 1, state: 1, submission: 1, owner: 1, leaseUntil: 1});
-    const runs = await scoped('generation_runs', {_id: 1, state: 1, owner: 1, leaseUntil: 1, finishedAt: 1, artifactId: 1});
+    const runs = await scoped('generation_runs', {_id: 1,workspaceId:1,projectId:1,inputHash:1,rendererBuildHash:1,leaseEpoch:1,executorProtocol:1,submissionCount:1, state: 1, owner: 1, leaseUntil: 1, finishedAt: 1, artifactId: 1});
+    await scoped('generation_executors');await scoped('execution_cleanup_tasks',{_id:1,state:1});
+    for(const run of runs)if(await db.collection('generation_executors').findOne({runId:run._id},{session,projection:{_id:1}})&&!await executionWorkspaceCleared(db,session,run as GenerationRun))blockers.add('incomplete_execution_cleanup');
     const plans = await scoped('plan_versions');
     for (const collection of ['approvals', 'generation_commands', 'plan_edit_commands', 'plan_restore_commands', 'project_delete_commands', 'activity_events']) await scoped(collection);
     await read('idempotency_records', {workspaceId: project.workspaceId, 'safeResultRef.id': projectId});
@@ -66,7 +71,8 @@ export async function sourceRetentionAudit(client: MongoClient, name: string, pr
     const stages = await read('stage_attempts', {jobId: {$in: jobIds}}, {_id: 1, state: 1});
     await read('planning_commands', {workspaceId: project.workspaceId, jobId: {$in: jobIds}});
     const artifacts = await read('generation_local_artifacts', {runId: {$in: runIds}}, {_id: 1, runId: 1, workspaceId: 1, manifestHash: 1, inputHash: 1, rendererBuildHash: 1});
-    const bundles = await scoped('generation_storage_bundles', {_id: 1, state: 1});
+    const bundles = await scoped('generation_storage_bundles', {_id: 1, state: 1,epoch:1});
+    const unpromoted=await scoped('unpromoted_cleanup_tasks',{_id:1,state:1});
     const assets = await scoped('video_assets', {_id: 1, lifecycleState: 1});
     const local = await scoped('local_render_cleanup_tasks', {_id: 1, runId: 1, state: 1, 'source.artifactId': 1,
       'source.runId': 1, 'source.manifestHash': 1, 'source.inputHash': 1, 'source.rendererBuildHash': 1});
@@ -83,7 +89,7 @@ export async function sourceRetentionAudit(client: MongoClient, name: string, pr
       || runs.some(row => !['failed', 'cancelled', 'rendered_local'].includes(row.state) || row.owner != null || row.leaseUntil != null)
       || stages.some(row => row.state !== 'settled') || attempts.some(row => !['settled', 'refused'].includes(row.state))) blockers.add('unresolved_work');
     if (attempts.some(a => a.workspaceId !== project.workspaceId) || artifacts.some(a => a.workspaceId !== project.workspaceId)) blockers.add('scope_mismatch');
-    if (bundles.some(row => row.state !== 'stored') || assets.some(row => row.lifecycleState !== 'deleted') || local.some(row => row.state !== 'cleaned') || runs.some(run => {
+    if (bundles.some(row => row.state !== 'stored'||!Long.isLong(row.epoch)||!row.epoch.equals(Long.ONE)) || unpromoted.some(row=>row.state!=='deleted') || assets.some(row => row.lifecycleState !== 'deleted') || local.some(row => row.state !== 'cleaned') || runs.some(run => {
       if (run.state !== 'rendered_local') return false;
       const artifact = artifacts.find(a => a._id === run.artifactId && a.runId === run._id);
       return !artifact || !local.some(t => t._id === artifact._id && t.runId === run._id && t.state === 'cleaned'

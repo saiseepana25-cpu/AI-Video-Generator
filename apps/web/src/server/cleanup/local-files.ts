@@ -7,8 +7,8 @@ import {CleanupFault} from './contracts';
 import type {LocalFileCleaner,LocalFile,LocalSource} from './local-contracts';
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const absent=(error:unknown)=>!!error&&typeof error==='object'&&'code'in error&&error.code==='ENOENT';
-const max=(name:string)=>name==='video.mp4'?128*1024*1024:name==='manifest.json'?256*1024:name==='input.json'?512*1024:name==='timing.json'?2*1024*1024:name==='captions.srt'?256*1024:16*1024*1024;
-export const localNames=['video.mp4','captions.srt','input.json','timing.json','manifest.json','narration.wav',...Array.from({length:8},(_,i)=>`scene-${i+1}.png`)];
+const max=(name:string)=>name==='video.mp4'?128*1024*1024:name==='manifest.json'||name==='.execution-owner.json'?256*1024:name==='input.json'?512*1024:name==='timing.json'?2*1024*1024:name==='captions.srt'?256*1024:16*1024*1024;
+export const localNames=['video.mp4','captions.srt','input.json','timing.json','manifest.json','narration.wav','.execution-owner.json',...Array.from({length:8},(_,i)=>`scene-${i+1}.png`)];
 const fail=()=>new CleanupFault('LOCAL_FILES_UNAVAILABLE');
 /** Exact regular files only. No recursive deletion, directory removal or DB-supplied path. */
 export class LocalRenderFiles implements LocalFileCleaner{
@@ -43,7 +43,7 @@ export class LocalRenderFiles implements LocalFileCleaner{
     return files;
   }
   async remove(source:LocalSource,files:LocalFile[]){
-    if(files.length<5||files.length>14||new Set(files.map(f=>f.name)).size!==files.length)throw fail();
+    if(files.length<5||files.length>15||new Set(files.map(f=>f.name)).size!==files.length)throw fail();
     // Validate the entire checkpoint before the first unlink. Core file hashes
     // must still be anchored in the completed bundle, even on a partial retry.
     for(const entry of files)if(!localNames.includes(entry.name)||!Number.isSafeInteger(entry.size)||entry.size<1||entry.size>max(entry.name)||!/^[a-f0-9]{64}$/.test(entry.sha256))throw fail();

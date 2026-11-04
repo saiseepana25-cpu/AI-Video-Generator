@@ -16,12 +16,19 @@ import {reuseReleaseStatus} from '../src/server/cleanup/reuse-pins';
 import {sourceRetentionAudit} from '../src/server/cleanup/source-retention';
 import {SourcePurgeService} from '../src/server/cleanup/source-purge';
 import {sourceCleanupStatus} from '../src/server/cleanup/source-contracts';
+import {ExecutionFiles} from '../src/server/cleanup/execution-files';
+import {ExecutionCleanupService} from '../src/server/cleanup/execution-service';
+import {orphanAudit} from '../src/server/cleanup/orphan-audit';
+import {UnpromotedCleanupService} from '../src/server/cleanup/unpromoted-service';
+import {LocalArtifactReader} from '../../../src/pipeline/storage-reader';
 async function main(){
   const [command,projectId,...rest]=process.argv.slice(2);
-  if(rest.length||!['worker','project','local','speech','release-reuse','source-audit','purge-source','status'].includes(command)||(command==='worker'?!!projectId:!projectId))throw new CleanupFault('Use cleanup worker | project <deleted-project-id> | local <deleted-project-id> | release-reuse <deleted-project-id> | speech <deleted-project-id> | source-audit <deleted-project-id> | purge-source <deleted-project-id> | status <deleted-project-id>');
+  if(rest.length||!['worker','project','local','speech','release-reuse','source-audit','purge-source','transient','orphan-audit','unpromoted','status'].includes(command)||(['worker','orphan-audit'].includes(command)?!!projectId:!projectId))throw new CleanupFault('Use cleanup worker | project <deleted-project-id> | local <deleted-project-id> | release-reuse <deleted-project-id> | speech <deleted-project-id> | source-audit <deleted-project-id> | purge-source <deleted-project-id> | transient <project-id> | orphan-audit | unpromoted <deleted-project-id> | status <deleted-project-id>');
   if(projectId)requireProjectId(projectId);const settings=inspectDatabaseSettings(process.env);if(!settings)throw new CleanupFault('DATABASE_CONFIGURATION_REQUIRED');
   const client=new MongoClient(settings.mongoUri,databaseClientOptions);let store:R2ObjectStore|undefined;
   try{await client.connect();const db=client.db(settings.databaseName);await assertDatabaseReady(db);
+    if(command==='orphan-audit'){console.log(await orphanAudit(db,path.resolve(process.cwd(),'../..')));return;}
+    if(command==='transient'){const root=path.resolve(process.cwd(),'../..'),service=new ExecutionCleanupService(client,settings.databaseName,root,await ExecutionFiles.create(root));let count=0;while(count<100&&await service.next(projectId!))count++;console.log({cleanedExecutions:count,batchLimit:100,unknownFilesRetained:true});return;}
     if(projectId&&!await db.collection<ProjectRecord>('projects').findOne({_id:projectId,deletedAt:{$type:'date'}},{projection:{_id:1}}))throw new CleanupFault('DELETED_PROJECT_REQUIRED');
     if(command==='source-audit'){console.log(JSON.stringify(await sourceRetentionAudit(client,settings.databaseName,projectId!),null,2));return;}
     if(command==='purge-source'){console.log(await new SourcePurgeService(client,settings.databaseName).purge(projectId!));return;}
@@ -29,7 +36,9 @@ async function main(){
     if(command==='release-reuse'){const service=new ReuseReleaseService(client,settings.databaseName);let count=0;while(count<100&&await service.next(projectId!))count++;console.log({releasedReferences:count,batchLimit:100,retainedContent:true});return;}
     if(command==='speech'){const service=new SpeechCleanupService(client,settings.databaseName,await SpeechFiles.create(path.resolve(process.cwd(),'../..')));let count=0;while(count<100&&await service.next(projectId!))count++;console.log({processedSpeechFiles:count,batchLimit:100,retainedContent:true});return;}
     if(command==='local'){const service=new LocalCleanupService(client,settings.databaseName,await LocalRenderFiles.create(path.resolve(process.cwd(),'../..')));let count=0;while(count<100&&await service.next(projectId!))count++;console.log({processedArtifacts:count,batchLimit:100,retainedContent:true});return;}
-    store=new R2ObjectStore(process.env);const service=new MediaCleanupService(client,settings.databaseName,store);
+    store=new R2ObjectStore(process.env);
+    if(command==='unpromoted'){const service=new UnpromotedCleanupService(client,settings.databaseName,store,new LocalArtifactReader(path.resolve(process.cwd(),'../..')));let count=0;while(count<100&&await service.next(projectId!))count++;console.log({cleanedUnpromotedBundles:count,batchLimit:100,uncertainUploadsRetained:true});return;}
+    const service=new MediaCleanupService(client,settings.databaseName,store);
     if(command==='project'){let count=0;while(count<100&&await service.next(projectId))count++;console.log({processedAssets:count,batchLimit:100});return;}
     let stop=false;const stopping=()=>{stop=true;};process.once('SIGINT',stopping);process.once('SIGTERM',stopping);
     console.log('Ready-media cleanup worker started. Deleted projects only; no local files, provider calls or prefix deletion.');

@@ -36,7 +36,8 @@ async function main(){
       if(!samples.every(value=>Number.isFinite(value)&&Math.abs(value)<=1))throw new Error('Invalid samples');
       return {segmentId:c.segmentId,text:c.text,source:c.source,audio:{samples,sampleRate:c.sampleRate}};
     }));
-    const result=await renderSelectedVideo({root,outputRoot:path.join(root,'output','dashboard-renders',raw.runId),artifactId:raw.artifactId,scratchRoot:path.join(folder,'scratch'),plan,expectedHash:raw.hash,clips,
+    const hex=path.basename(folder),executionId=`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    const result=await renderSelectedVideo({root,outputRoot:path.join(root,'output','dashboard-renders',raw.runId),artifactId:raw.artifactId,executionId,runId:raw.runId,scratchRoot:path.join(folder,'scratch'),plan,expectedHash:raw.hash,clips,
       mode:raw.diagnostic===true?'offline-diagnostic':'elevenlabs-evaluation',licenseConfirmed:true,signal,logoBytes:raw.logo?await fs.readFile(path.join(folder,'logo.png')):undefined,
       onProgress:progress=>{if(raw.diagnostic===true&&progress>.05)void fs.writeFile(path.join(folder,'progress.json'),'{}',{flag:'wx'}).catch(()=>{});}});
     await fs.writeFile(path.join(folder,'result.json'),JSON.stringify({ok:true,result}),{flag:'wx'});

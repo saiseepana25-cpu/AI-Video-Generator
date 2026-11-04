@@ -9,6 +9,8 @@ import {LocalCleanupService} from './local-service';
 import {hasRetainedSpeechPin, matchesReuseRelease, type ReuseRelease} from './reuse-pins';
 import {CleanupFault} from './contracts';
 import {sourceRecordHash, projectPayload, type SourceCollection, type SourcePurgeReceipt, type PurgedRecord} from './source-contracts';
+import {failedRunWorkspaceCleared,executionWorkspaceCleared} from './execution-proof';
+import type {GenerationRun} from '../generation/contracts';
 const removed = ['jobs', 'plan_versions', 'approvals', 'ready_videos'] as const;
 const redacted = ['idempotency_records', 'project_duplicate_commands'] as const;
 const fail = () => new CleanupFault('SOURCE_PURGE_UNAVAILABLE');
@@ -88,7 +90,8 @@ export class SourcePurgeService {
         || !matchesReuseRelease(ref, await db.collection<ReuseRelease>('speech_reuse_releases').findOne({_id: ref._id}, {session}))) throw fail();
       for (const run of runs) {
         if (!['cancelled', 'failed', 'rendered_local'].includes(run.state) || run.owner != null || run.leaseUntil != null || !(run.finishedAt instanceof Date)) throw fail();
-        if (run.state !== 'rendered_local' && (run.startedAt != null || run.artifactId || run.submissionCount > 0)) throw new CleanupFault('SOURCE_LIFECYCLE_UNRESOLVED');
+        if (run.state !== 'rendered_local' && (run.startedAt != null || run.artifactId || run.submissionCount > 0)&&!await failedRunWorkspaceCleared(db,session,run as GenerationRun)) throw new CleanupFault('SOURCE_LIFECYCLE_UNRESOLVED');
+        if(await db.collection('generation_executors').findOne({runId:run._id},{session,projection:{_id:1}})&&!await executionWorkspaceCleared(db,session,run as GenerationRun))throw new CleanupFault('SOURCE_LIFECYCLE_UNRESOLVED');
         if (run.state === 'rendered_local') {
           const proof = await LocalCleanupService.proof(db, session, run._id);
           const local = await db.collection<Row>('local_render_cleanup_tasks').findOne({_id: run.artifactId, ...scope, runId: run._id, state: 'cleaned'}, {session});

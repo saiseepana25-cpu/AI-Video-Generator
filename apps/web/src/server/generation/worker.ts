@@ -72,7 +72,7 @@ export class GenerationWorker {
     await closeGenerationReservation(db, session, run, unknown ? 'uncertain' : (run.submissionCount ?? 0) ? 'settled' : 'unused');
     const cancelled = run.state === 'cancellation_requested' || code === 'CANCELLED';
     const state = cancelled ? 'cancelled' : code || unknown ? 'failed' : 'rendered_local', now = new Date();
-    const error = unknown ? safeError('SPEECH_OUTCOME_UNKNOWN') : code ? safeError(code) : null;
+    const error = unknown ? safeError('SPEECH_OUTCOME_UNKNOWN') : cancelled ? safeError('CANCELLED') : code ? safeError(code) : null;
     if (artifact && state === 'rendered_local') await db.collection<LocalArtifact>('generation_local_artifacts').insertOne(artifact, {session});
     await db.collection<GenerationRun>('generation_runs').updateOne({_id: run._id}, {$set: {state, finishedAt: now, updatedAt: now, owner: null, leaseUntil: null,
       leaseEpoch: run.leaseEpoch ?? Long.ZERO, startedAt: run.startedAt ?? null, stage: run.stage ?? 'plan_validation', submissionCount: run.submissionCount ?? 0,

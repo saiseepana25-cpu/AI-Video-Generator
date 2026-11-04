@@ -6,7 +6,7 @@ import type {Long,Db,ClientSession} from 'mongodb';
 import type {GenerationRun} from './contracts';
 export type Execution={_id:string;workspaceId:string;projectId:string;runId:string;inputHash:string;rendererBuildHash:string;hostHash:string;rootHash:string;
   owner:string;leaseEpoch:Long;stage:'preflight'|'render';artifactId:string|null;jobName:string;protocol:'windows-job-v1';state:'prepared'|'running'|'recovering'|'stopped';
-  revision:Long;createdAt:Date;updatedAt:Date;stoppedAt:Date|null;exitCode:number|null;stopReason:'completed'|'cancelled'|'recovered'|null};
+  revision:Long;createdAt:Date;updatedAt:Date;stoppedAt:Date|null;exitCode:number|null;stopReason:'completed'|'cancelled'|'recovered'|null;payloadSealedAt?:Date|null};
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 let hostIdentity:string|undefined;
 export function executorLocation(root:string){

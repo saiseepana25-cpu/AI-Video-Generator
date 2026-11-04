@@ -8,6 +8,7 @@ import {GenerationFault} from './engine';
 import {executorLocation,type Execution} from './executor-contracts';
 import {WindowsExecutor,inspectWindowsExecutor,type ExecutorIdentity} from '../../../../../src/pipeline/windows-executor';
 import {ExecutorStopUnconfirmed} from '../../../../../src/pipeline/executor-stop';
+import {workspaceOwner} from '../../../../../src/pipeline/execution-owner';
 const fault=()=>new GenerationFault('EXECUTOR_STOP_UNCONFIRMED',true);
 type Handle={prepared:Promise<void>;stopped:Promise<number>;admit():void;cancel():void};
 export type ExecutorHost={start(identity:ExecutorIdentity):Handle;inspect(identity:ExecutorIdentity,terminate:boolean):Promise<boolean>};
@@ -25,9 +26,17 @@ export class DatabaseExecutor {
   private async stopped(row:Execution,code:number,reason:Execution['stopReason']){
     return databaseTransaction(this.client,this.name,async(db,session)=>{
       const current=await db.collection<Execution>('generation_executors').findOne({_id:row._id},{session});if(!current)throw fault();this.identity(current);
-      if(current.runId!==row.runId||current.owner!==row.owner||!current.leaseEpoch.equals(row.leaseEpoch)||current.inputHash!==row.inputHash)throw fault();
+      if(current.runId!==row.runId||current.owner!==row.owner||!current.leaseEpoch.equals(row.leaseEpoch)||current.inputHash!==row.inputHash||current.rendererBuildHash!==row.rendererBuildHash||current.workspaceId!==row.workspaceId||current.projectId!==row.projectId)throw fault();
       if(current.state==='stopped')return;
       if(!(await db.collection<Execution>('generation_executors').updateOne({_id:row._id,revision:current.revision,state:current.state},{$set:{state:'stopped',exitCode:code,stopReason:reason,stoppedAt:new Date(),updatedAt:new Date()},$inc:{revision:Long.ONE}},{session})).matchedCount)throw fault();
+    });
+  }
+  private async seal(row:Execution){
+    await databaseTransaction(this.client,this.name,async(db,session)=>{
+      const current=await db.collection<Execution>('generation_executors').findOne({_id:row._id,runId:row.runId,owner:row.owner,leaseEpoch:row.leaseEpoch},{session});if(!current)throw fault();
+      this.identity(current);if(current.inputHash!==row.inputHash||current.rendererBuildHash!==row.rendererBuildHash||current.workspaceId!==row.workspaceId||current.projectId!==row.projectId)throw fault();
+      if(current.payloadSealedAt)return;
+      if(!(await db.collection<Execution>('generation_executors').updateOne({_id:row._id,revision:current.revision},{$set:{payloadSealedAt:new Date(),updatedAt:new Date()},$inc:{revision:Long.ONE}},{session})).matchedCount)throw fault();
     });
   }
   async execute(runId:string,stage:Execution['stage'],input:Record<string,unknown>,signal:AbortSignal,prepare?:(folder:string)=>Promise<void>){
@@ -35,21 +44,24 @@ export class DatabaseExecutor {
     const row=await databaseTransaction(this.client,this.name,async(db,session)=>{
       const run=await this.owned(db,session,runId,stage);if(input.hash!==run.inputHash)throw fault();
       const id=randomUUID(),now=new Date();const row:Execution={_id:id,workspaceId:run.workspaceId,projectId:run.projectId,runId,inputHash:run.inputHash,rendererBuildHash:run.rendererBuildHash,...this.location,
-        owner:this.owner,leaseEpoch:run.leaseEpoch!,stage,artifactId:stage==='render'?randomUUID():null,jobName:`Local\\VideoCraft_${id.replaceAll('-','')}`,protocol:'windows-job-v1',state:'prepared',revision:Long.ONE,createdAt:now,updatedAt:now,stoppedAt:null,exitCode:null,stopReason:null};
+        owner:this.owner,leaseEpoch:run.leaseEpoch!,stage,artifactId:stage==='render'?randomUUID():null,jobName:`Local\\VideoCraft_${id.replaceAll('-','')}`,protocol:'windows-job-v1',state:'prepared',revision:Long.ONE,createdAt:now,updatedAt:now,stoppedAt:null,exitCode:null,stopReason:null,payloadSealedAt:null};
       await db.collection<Execution>('generation_executors').insertOne(row,{session});return row;
     });
     const identity=this.identity(row),folder=path.join(this.root,'.cache','executors',identity.id);let handle:Handle|undefined;
     const abort=()=>handle?.cancel();
     try{
-      await fs.mkdir(folder,{recursive:true});if(await fs.realpath(this.root)!==this.root||await fs.realpath(folder)!==folder)throw fault();
-      await prepare?.(folder);
-      await fs.writeFile(path.join(folder,'input.json'),JSON.stringify({...input,protocol:row.protocol,kind:stage,runId,artifactId:row.artifactId}),{flag:'wx'});
+      try{
+        await fs.mkdir(path.dirname(folder),{recursive:true});await fs.mkdir(folder);if(await fs.realpath(this.root)!==this.root||await fs.realpath(folder)!==folder)throw fault();
+        await fs.writeFile(path.join(folder,'.workspace-owner.json'),workspaceOwner(row._id,row.runId,row.inputHash,row.rendererBuildHash).bytes,{flag:'wx'});
+        await prepare?.(folder);
+        await fs.writeFile(path.join(folder,'input.json'),JSON.stringify({...input,protocol:row.protocol,kind:stage,runId,artifactId:row.artifactId}),{flag:'wx'});
+      }finally{await this.seal(row);}
       signal.throwIfAborted();handle=this.host.start(identity);signal.addEventListener('abort',abort,{once:true});
       await handle.prepared;
       if(signal.aborted){handle.cancel();}else{
         await databaseTransaction(this.client,this.name,async(db,session)=>{
           const run=await this.owned(db,session,runId,stage);if(!run.leaseEpoch!.equals(row.leaseEpoch))throw fault();
-          if(!(await db.collection<Execution>('generation_executors').updateOne({_id:row._id,state:'prepared',revision:Long.ONE},{$set:{state:'running',updatedAt:new Date()},$inc:{revision:Long.ONE}},{session})).matchedCount)throw fault();
+          if(!(await db.collection<Execution>('generation_executors').updateOne({_id:row._id,runId:row.runId,workspaceId:row.workspaceId,projectId:row.projectId,owner:row.owner,leaseEpoch:row.leaseEpoch,inputHash:row.inputHash,rendererBuildHash:row.rendererBuildHash,hostHash:row.hostHash,rootHash:row.rootHash,state:'prepared',payloadSealedAt:{$type:'date'}},{$set:{state:'running',updatedAt:new Date()},$inc:{revision:Long.ONE}},{session})).matchedCount)throw fault();
         });
         if(signal.aborted)handle.cancel();else handle.admit();
       }
