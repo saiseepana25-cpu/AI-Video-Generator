@@ -79,6 +79,6 @@ export function PlanningPanel({projectId, revision, briefRevision, ready, scope,
       <PlanReadiness plan={plan} enabled={ready && !outdated && !active && !command && !sending && !editing && !historyPending} onPending={setChecking} onChecked={setChecked}/>
     </div>}
     <PlanHistory projectId={projectId} current={plan} scope={scope} enabled={ready && !active && !command && !sending && !editing && !checking} onPending={setHistoryPending} onSaved={async () => {await onProjectSaved(); await load();}}/>
-    <GenerationPanel projectId={projectId} revision={revision} scope={scope} checked={checked} enabled={ready && !command && !sending && !editing && !historyPending && !checking} onPending={setGenerationPending} onSaved={async () => {await onProjectSaved(); await load();}}/>
+    <GenerationPanel currentPlanVersionId={plan?.id??null} projectId={projectId} revision={revision} scope={scope} checked={checked} enabled={ready && !command && !sending && !editing && !historyPending && !checking} onPending={setGenerationPending} onSaved={async () => {await onProjectSaved(); await load();}}/>
   </section>;
 }

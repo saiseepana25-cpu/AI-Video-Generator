@@ -11,9 +11,10 @@ import {buildRenderPlan, generationHash, RenderInputError, type FontPins} from '
 import {loadFontPins} from './assets';
 import {compatibleWorker, readGenerationWorker, workerUnavailable} from '../generation/capability';
 import {readBrandSelection} from '../brand/selection';
+import {ProviderStore} from '../providers/store';
 
 export class RenderInputService {
-  constructor(private client: MongoClient, private name: string, private context: ProjectContext, private env: Env, private assets: () => Promise<FontPins> = loadFontPins) {}
+  constructor(private client: MongoClient, private name: string, private context: ProjectContext, private env: Env, private assets: () => Promise<FontPins> = loadFontPins, private request?:typeof fetch) {}
   /** Read-only preparation, never approval or dispatch. F09 must rerun these
    * checks and atomically pin the result against its expected revision/hash.
    */
@@ -49,6 +50,16 @@ export class RenderInputService {
     // No key/config hash is part of the content hash or public projection.
     if (!providerConfig('elevenlabs', this.env).key && !blocks.length) blocks.push({code: 'INTEGRATION_NOT_CONFIGURED', message: 'Configure the speech provider before generation.'});
     return {version, projectRevision: project.revision.toNumber(), plan, generationInputHash: generationHash(plan), issues: [], executionBlocks: blocks};
+  }
+  /** Interactive check may refresh expired connection metadata after access and
+   * input validation. Approval/prepare retain their independent strict gates. */
+  async checkWithFreshAvailability(id:string){
+    const prepared=await this.prepare(id);
+    if(prepared.plan&&prepared.executionBlocks.some(block=>block.code==='CAPABILITY_STALE')){
+      await new ProviderStore(this.client.db(this.name),this.env,this.request).refresh('elevenlabs');
+    }
+    // Re-read the plan/provider after I/O; never reuse the earlier content scope.
+    return this.check(id);
   }
   async check(id: string) {
     const result = await this.prepare(id), plan = result.plan;

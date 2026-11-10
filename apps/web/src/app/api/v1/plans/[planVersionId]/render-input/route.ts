@@ -8,6 +8,6 @@ export async function GET(request: Request, context: {params: Promise<{planVersi
   try {
     const service = await authenticatedRenderInput();
     if (new URL(request.url).search) throw new ProjectError('INVALID_QUERY', 400, 'Video input checks do not accept query parameters.');
-    return dataResponse(await service.check((await context.params).planVersionId));
+    return dataResponse(await service.checkWithFreshAvailability((await context.params).planVersionId));
   } catch (error) {return projectErrorResponse(error);}
 }

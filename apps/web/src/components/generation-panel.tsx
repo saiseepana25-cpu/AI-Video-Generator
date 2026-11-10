@@ -5,9 +5,10 @@ import type {RenderCheck} from '@/server/rendering/service';
 import type {GenerationView} from '@/server/generation/contracts';
 import {Button} from './ui';
 
-export function GenerationPanel({projectId, revision, scope, checked, enabled, onPending, onSaved}: {
+export function GenerationPanel({projectId, revision, scope, checked, enabled, currentPlanVersionId, onPending, onSaved}: {
   projectId: string; revision: number; scope: string; checked: RenderCheck | null; enabled: boolean;
   onPending: (value: boolean) => void; onSaved: () => Promise<void>;
+  currentPlanVersionId?:string|null;
 }) {
   const [job, setJob] = useState<GenerationView | null>(null), [command, setCommand] = useState<GenerationCommand | null>(null);
   const [loaded, setLoaded] = useState(false), [sending, setSending] = useState(false), [message, setMessage] = useState('');
@@ -27,6 +28,7 @@ export function GenerationPanel({projectId, revision, scope, checked, enabled, o
     void load(); const timer = setInterval(() => void load(), 3000); return () => clearInterval(timer);
   }, [storageKey, projectId, load]);
   const active = !!job && ['queued', 'running', 'cancellation_requested'].includes(job.state);
+  const earlierAttempt=!!job&&!!currentPlanVersionId&&job.planVersionId!==currentPlanVersionId&&!active;
   useEffect(() => {onPending(!loaded || !!command || sending || active); return () => onPending(false);}, [loaded, command, sending, active, onPending]);
   async function submit(next: GenerationCommand) {
     if (busy.current) return; busy.current = true; setSending(true);
@@ -51,7 +53,9 @@ export function GenerationPanel({projectId, revision, scope, checked, enabled, o
     }}>Approve & generate video</Button></div>
     <p className="muted-copy">Approve the saved narration, matching subtitles and diagrams together. Generation uses the reviewed voice and settings, with free evaluation allowance only.</p>
     {!checked && !active && <p className="muted-copy">Check your video plan first. A compatible local generation worker must be running before approval is available.</p>}
-    {job && <div aria-live="polite"><p><strong>Video · {job.state.replaceAll('_', ' ')}</strong></p><p className="muted-copy">{job.state === 'queued' ? 'Waiting for the local generation worker.' : job.state === 'running' ? `Working on ${job.stage.replaceAll('_', ' ')}. You can leave this page and return.` : job.state === 'cancellation_requested' ? 'Stopping generation. Submitted speech may still consume free allowance.' : job.state === 'rendered_local' ? 'Rendering finished. Private storage and playback availability are shown in the finished-video panel.' : job.state === 'cancelled' ? 'Generation stopped. Review a new plan version to request another take.' : 'Generation did not finish. Your reviewed plan is retained.'}</p>
+    {checked&&!active&&checked.executionBlocks.length>0&&<div role="status">{checked.executionBlocks.map(block=><p key={block.code}>{block.message}</p>)}<p className="muted-copy">Resolve these checks, then select Check video plan again.</p></div>}
+    {checked&&!active&&checked.projectRevision!==revision&&<p role="status">The saved project changed. Check video plan again before approval.</p>}
+    {job && <div aria-live="polite"><p><strong>{earlierAttempt?'Earlier plan’s video':'Video'} · {job.state.replaceAll('_', ' ')}</strong></p>{earlierAttempt&&<p className="muted-copy">This result belongs to an earlier plan. Your edited plan needs its own check and approval.</p>}<p className="muted-copy">{job.state === 'queued' ? 'Waiting for the local generation worker.' : job.state === 'running' ? `Working on ${job.stage.replaceAll('_', ' ')}. You can leave this page and return.` : job.state === 'cancellation_requested' ? 'Stopping generation. Submitted speech may still consume free allowance.' : job.state === 'rendered_local' ? 'Rendering finished. Private storage and playback availability are shown in the finished-video panel.' : job.state === 'cancelled' ? 'Generation stopped. Review a new plan version to request another take.' : 'Generation did not finish. Your reviewed plan is retained.'}</p>
       {job.error && <p role="alert">{job.error.message}</p>}
       {job.allowedActions.includes('cancel') && <Button variant="secondary" disabled={!!command || sending} onClick={() => void submit({projectId, key: crypto.randomUUID(), action: 'cancel', targetId: job.jobId, body: {expectedRevision: job.statusRevision}})}>{job.state === 'queued' ? 'Cancel queued video' : 'Request cancellation'}</Button>}</div>}
     {message && <p role="alert">{message}</p>}

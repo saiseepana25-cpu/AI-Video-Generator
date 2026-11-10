@@ -11,7 +11,7 @@ import {canonicalJson, generationHash, validateRenderPlan} from '../src/server/r
 import type {PlanVersion} from '../src/server/planning/contracts';
 import {membershipFixture, workspaceFixture, projectFixture, testUserId, testWorkspaceId, type Row} from './fixtures/database';
 import {pins, renderFixture} from './fixtures/rendering';
-import {providerEnv, providerFixture} from './fixtures/providers';
+import {providerEnv, providerFixture, providerMock} from './fixtures/providers';
 import type {ProviderControl} from '../src/server/providers/contracts';
 import {digest} from '../src/server/providers/config';
 import {PlanEditService} from '../src/server/planning/plan-edit-service';
@@ -46,6 +46,40 @@ describe('exact reviewed-input admission and queued cancellation', {concurrency:
     ({projectId, version} = await seed());
   });
   after(async () => {try {if (!/^videocraft_f09_test_[a-f0-9]{32}$/.test(name)) throw new Error('Unsafe cleanup'); await db.dropDatabase();} finally {await client.close();}});
+  test('interactive plan check refreshes expired speech metadata and permits approval without speech or new jobs',async()=>{
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{expiresAt:new Date(0)}});
+    const calls:{url:string;method:string}[]=[],checker=new RenderInputService(client,name,context,providerEnv,async()=>pins,providerMock(calls));
+    const stale=await checker.check(version._id);assert.equal(stale.canGenerate,false);assert.equal(stale.executionBlocks[0].code,'CAPABILITY_STALE');assert.equal(calls.length,0);
+    const fresh=await checker.checkWithFreshAvailability(version._id);assert.equal(fresh.canGenerate,true);assert.equal(fresh.generationInputHash,stale.generationInputHash);assert(calls.length>0);assert(calls.every(c=>c.method==='GET'));
+    const count=calls.length;await checker.checkWithFreshAvailability(version._id);assert.equal(calls.length,count);assert.equal(await db.collection('approvals').countDocuments(),0);assert.equal(await db.collection('generation_runs').countDocuments(),0);
+  });
+  test('interactive refresh retains operator disablement and uncertainty without provider requests',async()=>{
+    const calls:{url:string;method:string}[]=[],checker=new RenderInputService(client,name,context,providerEnv,async()=>pins,providerMock(calls));
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{expiresAt:new Date(0),operatorDisabled:true}});
+    assert.equal((await checker.checkWithFreshAvailability(version._id)).executionBlocks[0].code,'PROVIDER_DISABLED');
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{operatorDisabled:false,reservations:[{id:randomUUID(),units:10,state:'uncertain',createdAt:new Date()}]}});
+    assert.equal((await checker.checkWithFreshAvailability(version._id)).executionBlocks[0].code,'UNCERTAIN_PROVIDER_USAGE');assert.equal(calls.length,0);
+  });
+  test('interactive refresh reports provider failure and insufficient allowance without admitting a job',async()=>{
+    const row=await speech();await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{expiresAt:new Date(0)}});
+    const denied=new RenderInputService(client,name,context,providerEnv,async()=>pins,(async()=>new Response('',{status:403})) as typeof fetch);
+    assert.equal((await denied.checkWithFreshAvailability(version._id)).executionBlocks[0].code,'PROVIDER_ACCESS_DENIED');
+    await db.collection<ProviderControl>('provider_controls').replaceOne({_id:'elevenlabs'},{...row!,expiresAt:new Date(0)});
+    const short=new RenderInputService(client,name,context,providerEnv,async()=>pins,providerMock([],{remaining:1}));
+    assert.equal((await short.checkWithFreshAvailability(version._id)).executionBlocks[0].code,'FREE_ALLOWANCE_INSUFFICIENT');assert.equal(await db.collection('generation_runs').countDocuments(),0);
+  });
+  test('interactive refresh authenticates first and revalidates a changed plan after metadata I/O',async()=>{
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{expiresAt:new Date(0)}});let calls=0;const mock=providerMock([]);
+    const changing=(async(url,options)=>{calls++;if(String(url).endsWith('/subscription'))await db.collection<Row>('projects').updateOne({_id:projectId},{$inc:{briefRevision:Long.ONE,revision:Long.ONE}});return mock(url,options);}) as typeof fetch;
+    await assert.rejects(new RenderInputService(client,name,{...context,workspaceId:randomUUID()},providerEnv,async()=>pins,changing).checkWithFreshAvailability(version._id));assert.equal(calls,0);
+    await assert.rejects(new RenderInputService(client,name,context,providerEnv,async()=>pins,changing).checkWithFreshAvailability(version._id),/current plan/);assert(calls>0);assert.equal(await db.collection('approvals').countDocuments(),0);
+  });
+  test('operator disablement during an interactive metadata refresh wins over refreshed availability',async()=>{
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{expiresAt:new Date(0)}});const mock=providerMock([]);
+    const disabling=(async(url,options)=>{if(String(url).endsWith('/subscription'))await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{operatorDisabled:true}});return mock(url,options);}) as typeof fetch;
+    const result=await new RenderInputService(client,name,context,providerEnv,async()=>pins,disabling).checkWithFreshAvailability(version._id);
+    assert.equal(result.canGenerate,false);assert.equal(result.executionBlocks[0].code,'PROVIDER_DISABLED');assert.equal((await speech())!.operatorDisabled,true);
+  });
   const body = () => ({expectedProjectRevision: 1, planVersionId: version._id, generationInputHash: generationHash(renderFixture(version.plan.language).plan)});
   const speech = () => db.collection<ProviderControl>('provider_controls').findOne({_id: 'elevenlabs'});
   const approve = () => service.approve(projectId, body(), randomUUID());

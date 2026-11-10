@@ -12,7 +12,7 @@ export function PlanReadiness({plan, enabled, onPending, onChecked}: {plan: Plan
   async function check() {
     if (busy.current) return; busy.current = true; const request = ++epoch.current; setChecking(true); setResult(null); onChecked(null); setMessage('');
     try {
-      const r = await fetch(`/api/v1/plans/${plan.id}/render-input`, {cache: 'no-store', signal: AbortSignal.timeout(15000)}), v = await r.json();
+      const r = await fetch(`/api/v1/plans/${plan.id}/render-input`, {cache: 'no-store', signal: AbortSignal.timeout(30000)}), v = await r.json();
       if (request !== epoch.current) return;
       if (!r.ok) {setMessage(v.error?.message ?? 'Could not check this plan. Your saved work is unchanged.'); return;}
       if (v.data.planVersionId !== plan.id || v.data.projectRevision !== plan.projectRevision) {setMessage('The project changed. Review the latest saved plan and check again.'); return;}
