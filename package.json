@@ -15,6 +15,7 @@
     "web:db:check": "npm --prefix apps/web run db:check",
     "web:db:test": "npm --prefix apps/web run db:test",
     "web:db:test:init": "npm --prefix apps/web run db:test:init",
+    "web:providers:reconcile": "npm --prefix apps/web run providers:reconcile --",
     "web:providers:check": "npm --prefix apps/web run providers:check",
     "web:providers:probe": "npm --prefix apps/web run providers:probe --",
     "web:providers:policy": "npm --prefix apps/web run providers:policy --",

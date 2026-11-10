@@ -458,3 +458,14 @@ node --import tsx --test tests/executor-crash.acceptance.ts
 ```
 
 It uses a strict loopback test database and newly allocated fixture files only, kills its own render worker, verifies named Job stop proof before recovery, then checks real bounded cleanup. It also exercises requested cancellation. Whole-machine power loss and hosted execution remain separate deployment checks.
+
+### Reconcile old settled speech holds
+
+After independently checking the current free-account balance in ElevenLabs, an operator may run:
+
+```powershell
+npm.cmd run web:providers:policy -- status elevenlabs
+npm.cmd run web:providers:reconcile -- <confirmed-remaining-credits> <current-provider-revision> <command-uuid>
+```
+
+Migration 028 must be applied/checked first with app writers stopped. This command verifies the same balance with fresh provider metadata and permanently archives only proven settled generation holds older than 24 hours. Active/uncertain usage blocks reconciliation; unmatched probe holds stay deducted. Keep the command UUID and inputs to resolve an unconfirmed outcome by replay; do not assume a receipt's historical available balance is current. It submits no speech/video and changes no billing. Refresh availability and Check video plan afterward; user approval still starts generation.

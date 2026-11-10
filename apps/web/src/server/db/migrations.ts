@@ -27,6 +27,7 @@ import {reuseReleaseCollections} from './reuse-release-schemas';
 import {sourcePurgeCollections} from './source-purge-schemas';
 import {executorCollections} from './executor-schemas';
 import {executionCleanupCollections} from './execution-cleanup-schemas';
+import {allowanceReconciliationCollections} from './allowance-reconciliation-schemas';
 
 export class DatabaseSetupError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -72,6 +73,7 @@ const migrations = [
   {definition:{id:'025_source_payload_purge',description:'Permanent minimal source-content purge receipts after completed ownership cleanup',contracts:sourcePurgeCollections},checksum:createHash('sha256').update(JSON.stringify(sourcePurgeCollections)).digest('hex')},
   {definition:{id:'026_executor_termination',description:'Durable named Windows executor admission and physical stop evidence',contracts:executorCollections},checksum:createHash('sha256').update(JSON.stringify(executorCollections)).digest('hex')},
   {definition:{id:'027_execution_workspace_cleanup',description:'Reference-aware stopped execution workspace and partial artifact cleanup checkpoints',contracts:executionCleanupCollections},checksum:createHash('sha256').update(JSON.stringify(executionCleanupCollections)).digest('hex')},
+  {definition:{id:'028_speech_allowance_reconciliation',description:'Permanent operator-confirmed archival of proven settled speech reservations',contracts:allowanceReconciliationCollections},checksum:createHash('sha256').update(JSON.stringify(allowanceReconciliationCollections)).digest('hex')},
 ];
 const currentContracts = [...new Map(migrations.flatMap(migration => migration.definition.contracts).map(contract => [contract.name, contract])).values()];
 

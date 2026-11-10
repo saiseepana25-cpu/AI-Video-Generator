@@ -33,6 +33,8 @@ import {SpeechFiles} from '../src/server/cleanup/speech-files';
 import {encodeWav} from '../../../src/pipeline/wav';
 import {createHash} from 'node:crypto';
 import {orphanAudit} from '../src/server/cleanup/orphan-audit';
+import {SpeechAllowanceReconciliation} from '../src/server/providers/reconciliation';
+import {ProviderStore} from '../src/server/providers/store';
 import {UnpromotedCleanupService} from '../src/server/cleanup/unpromoted-service';
 import {requiredCapabilities, type GenerationRun, type SpeechAttempt, type GenerationWorker as WorkerRow} from '../src/server/generation/contracts';
 import type {PlanVersion} from '../src/server/planning/contracts';
@@ -40,7 +42,7 @@ import type {ProviderControl} from '../src/server/providers/contracts';
 import {digest} from '../src/server/providers/config';
 import {generationHash,buildRenderPlan} from '../src/server/rendering/contract';
 import {membershipFixture, projectFixture, workspaceFixture, testWorkspaceId, testUserId, type Row} from './fixtures/database';
-import {providerEnv, providerFixture} from './fixtures/providers';
+import {providerEnv, providerFixture, providerMock} from './fixtures/providers';
 import {pins, renderFixture} from './fixtures/rendering';
 import {StorageService} from '../src/server/storage/service';
 import {MediaCleanupService} from '../src/server/cleanup/service';
@@ -88,7 +90,7 @@ describe('generation worker ownership, submission fencing and recovery', {concur
   let db: Db, engine: FakeEngine, worker: GenerationWorker, service: GenerationService, projectId: string, planId: string;
   before(async () => {await client.connect(); db = client.db(name); await migrateDatabase(db);});
   beforeEach(async () => {
-    for (const n of ['unpromoted_cleanup_tasks','execution_cleanup_tasks','generation_executors','source_purge_receipts','speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
+    for (const n of ['speech_allowance_reconciliations','unpromoted_cleanup_tasks','execution_cleanup_tasks','generation_executors','source_purge_receipts','speech_reuse_releases','speech_cleanup_tasks','local_render_cleanup_tasks','media_cleanup_tasks','asset_refs','publishing_payloads','project_delete_commands','logo_uploads','logo_assets','logo_asset_refs','brand_kits','workspace_brand_commands','projects', 'workspaces', 'memberships', 'provider_controls', 'plan_versions', 'plan_edit_commands', 'activity_events', 'approvals', 'generation_runs', 'generation_workers', 'generation_commands', 'generation_speech_attempts', 'generation_speech_reuses', 'generation_local_artifacts', 'generation_storage_bundles', 'ready_videos', 'video_assets']) await db.collection(n).deleteMany({});
     await db.collection<Row>('workspaces').insertOne(workspaceFixture()); await db.collection<Row>('memberships').insertOne(membershipFixture());
     const provider = providerFixture(); provider.allowance.observedRemaining = 10000; await db.collection<ProviderControl>('provider_controls').insertOne(provider);
     const f = renderFixture(), project = projectFixture(); planId = randomUUID(); projectId = project._id;
@@ -315,6 +317,55 @@ describe('generation worker ownership, submission fencing and recovery', {concur
     await db.collection<WorkerRow>('generation_workers').updateOne({_id: 'generation:local'}, {$set: {state: 'disabled', expiresAt: new Date(0)}});
     assert.equal(await worker.heartbeat(), false); assert.equal(await other.heartbeat(), false); assert.equal(engine.speechCalls, 0);
     assert.equal((await db.collection<WorkerRow>('generation_workers').findOne({}))!.state, 'disabled');
+  });
+  async function reconciliationSetup(){
+    await approve();await worker.tick();const current=(await run())!,row=(await provider())!;
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:current._id},{$set:{reservationPeriodId:'9999999999'}});
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{'allowance.periodId':'9999999999','allowance.observedRemaining':1}});
+    const calls:{url:string;method:string}[]=[],input={commandId:randomUUID(),expectedRevision:row.revision.toNumber(),confirmedRemaining:1000},clock=()=>new Date(Date.now()+25*3600000);
+    return {current,calls,input,clock,service:new SpeechAllowanceReconciliation(client,name,providerEnv,providerMock(calls),clock)};
+  }
+  test('operator reconciliation archives proven completed holds once and metadata refresh does not deduct them again',async()=>{
+    const f=await reconciliationSetup(),result=await f.service.reconcile(f.input);assert.equal(result.availableAtReconciliation,1000);assert.equal(result.reconciledReservations,1);assert.equal((await provider())!.reservations.length,0);
+    const beforeCalls=f.calls.length;assert.equal((await f.service.reconcile(f.input)).replayed,true);assert.equal(f.calls.length,beforeCalls);assert(f.calls.every(c=>c.method==='GET'));
+    const receipt=(await db.collection<Row>('speech_allowance_reconciliations').findOne({_id:f.input.commandId}))!;assert.equal(receipt.reservations[0].id,f.current.reservationId);assert.equal(receipt.reservations[0].runId,f.current._id);
+    assert.equal(await db.collection('generation_speech_attempts').countDocuments({state:'settled'}),3);assert.equal((await run())!.state,'rendered_local');await new ProviderStore(db,providerEnv,providerMock([])).refresh('elevenlabs',true);assert.equal((await provider())!.allowance.observedRemaining,1000);await checkDatabase(db);
+    await assert.rejects(f.service.reconcile({...f.input,confirmedRemaining:999}),{code:'RECONCILIATION_COMMAND_MISMATCH'});
+  });
+  test('operator reconciliation preserves unmatched legacy probe holds in available allowance',async()=>{
+    const f=await reconciliationSetup(),id=randomUUID();await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$push:{reservations:{id,units:244,state:'settled',createdAt:new Date()}}});
+    const result=await f.service.reconcile(f.input);assert.equal(result.availableAtReconciliation,756);assert.equal(result.retainedUnits,244);assert.equal((await provider())!.reservations[0].id,id);
+    await new ProviderStore(db,providerEnv,providerMock([])).refresh('elevenlabs',true);assert.equal((await provider())!.allowance.observedRemaining,756);
+  });
+  test('operator reconciliation refuses uncertain/reserved holds, active runs and operator disablement before provider I/O',async()=>{
+    const f=await reconciliationSetup(),before=(await provider())!;
+    for(const state of ['uncertain','reserved'] as const){await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{'reservations.0.state':state}});await assert.rejects(f.service.reconcile(f.input));}
+    await db.collection<ProviderControl>('provider_controls').replaceOne({_id:'elevenlabs'},before);
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:f.current._id},{$set:{state:'running',owner:worker.owner,leaseUntil:new Date(Date.now()+90000),finishedAt:null}});await assert.rejects(f.service.reconcile(f.input),{code:'ACTIVE_OR_UNCERTAIN_SPEECH'});
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:f.current._id},{$set:{state:'rendered_local',owner:null,leaseUntil:null,finishedAt:f.current.finishedAt}});
+    await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{operatorDisabled:true}});await assert.rejects(f.service.reconcile(f.input));assert.equal(f.calls.length,0);assert.equal(await db.collection('speech_allowance_reconciliations').countDocuments(),0);
+  });
+  test('operator reconciliation retains recent, foreign-period and unverified speech outcomes',async()=>{
+    const f=await reconciliationSetup();await assert.rejects(new SpeechAllowanceReconciliation(client,name,providerEnv,providerMock([])).reconcile(f.input),{code:'NO_RECONCILABLE_RESERVATIONS'});
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:f.current._id},{$set:{reservationPeriodId:'foreign'}});await assert.rejects(f.service.reconcile(f.input),{code:'NO_RECONCILABLE_RESERVATIONS'});
+    await db.collection<GenerationRun>('generation_runs').updateOne({_id:f.current._id},{$set:{reservationPeriodId:'9999999999'}});
+    await db.collection<SpeechAttempt>('generation_speech_attempts').updateOne({runId:f.current._id},{$set:{state:'uncertain'}});await assert.rejects(f.service.reconcile(f.input),{code:'ACTIVE_OR_UNCERTAIN_SPEECH'});assert.equal((await provider())!.reservations.length,1);
+  });
+  test('reservation committed during reconciliation metadata read wins and prevents archival',async()=>{
+    const f=await reconciliationSetup();await db.collection<ProviderControl>('provider_controls').updateOne({_id:'elevenlabs'},{$set:{'allowance.observedRemaining':1000}});
+    const mock=providerMock([]),delayed=(async(url,options)=>{if(String(url).endsWith('/subscription'))await new ProviderStore(db,providerEnv).reserve('elevenlabs',1);return mock(url,options);}) as typeof fetch;
+    await assert.rejects(new SpeechAllowanceReconciliation(client,name,providerEnv,delayed,f.clock).reconcile(f.input),{code:'PROVIDER_STATE_CHANGED'});assert.equal((await provider())!.reservations.length,2);assert.equal((await provider())!.allowance.observedRemaining,999);assert.equal(await db.collection('speech_allowance_reconciliations').countDocuments(),0);
+  });
+  test('reconciliation transaction re-proves settled attempt receipts and refuses metadata balance mismatch',async()=>{
+    const f=await reconciliationSetup();await assert.rejects(f.service.reconcile({...f.input,confirmedRemaining:999}),{code:'PROVIDER_BALANCE_CHANGED'});
+    const mock=providerMock([]),delayed=(async(url,options)=>{if(String(url).endsWith('/subscription'))await db.collection<SpeechAttempt>('generation_speech_attempts').updateOne({runId:f.current._id},{$set:{state:'uncertain'}});return mock(url,options);}) as typeof fetch;
+    await assert.rejects(new SpeechAllowanceReconciliation(client,name,providerEnv,delayed,f.clock).reconcile(f.input));assert.equal((await provider())!.reservations.length,1);assert.equal(await db.collection('speech_allowance_reconciliations').countDocuments(),0);
+  });
+  test('reconciliation archive insertion failure rolls back provider allowance and retained holds',async()=>{
+    const f=await reconciliationSetup(),before=(await provider())!;const {allowanceReconciliationCollections}=await import('../src/server/db/allowance-reconciliation-schemas');
+    await db.command({collMod:'speech_allowance_reconciliations',validator:{$jsonSchema:{required:['controlled_failure']}}});
+    try{await assert.rejects(f.service.reconcile(f.input));}finally{await db.command({collMod:'speech_allowance_reconciliations',validator:allowanceReconciliationCollections[0].validator});}
+    assert.deepEqual(await provider(),before);assert.equal(await db.collection('speech_allowance_reconciliations').countDocuments(),0);assert.equal((await f.service.reconcile(f.input)).reconciledReservations,1);
   });
   test('approved input produces three settled attempts and one local artifact, not a ready/public video', async () => {
     const accepted = await approve(); assert.equal(await worker.tick(), true);
